@@ -8,6 +8,7 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 public record GradingRequest(
         @NotNull @Positive Long questionId,
@@ -17,6 +18,10 @@ public record GradingRequest(
         @NotBlank @Size(max = 10_000) String referenceAnswer,
         @Size(max = 10_000) String gradingCriteria,
         @NotNull @Size(max = 20_000) String studentAnswer,
-        FillBlankGradingMode fillBlankGradingMode
+        FillBlankGradingMode fillBlankGradingMode,
+        List<@jakarta.validation.Valid RubricItem> rubricItems
 ) {
+    public GradingRequest {
+        rubricItems = rubricItems == null ? List.of() : List.copyOf(rubricItems);
+    }
 }

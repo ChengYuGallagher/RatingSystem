@@ -27,6 +27,12 @@ public class AiGradingService {
             所有分数必须是数字，且不得小于 0 或超过对应满分。
             """;
 
+    private static final String STRUCTURED_RUBRIC_PROMPT = """
+            输入包含结构化 rubricItems 时，items 必须逐项返回对应的 rubricItemId，不能遗漏、增加或重复评分点。
+            JSON 格式为：
+            {"items":[{"rubricItemId":1,"criterion":"评分点","maxScore":3,"score":2,"reason":"逐项理由"}],"suggestedScore":2,"reason":"总评理由"}
+            """;
+
     private final AiClient aiClient;
     private final GradingResultValidator validator;
     private final ObjectMapper objectMapper;
@@ -47,7 +53,10 @@ public class AiGradingService {
         }
 
         try {
-            String rawResponse = aiClient.complete(SYSTEM_PROMPT, buildUserPrompt(request));
+            String systemPrompt = request.rubricItems().isEmpty()
+                    ? SYSTEM_PROMPT
+                    : SYSTEM_PROMPT + STRUCTURED_RUBRIC_PROMPT;
+            String rawResponse = aiClient.complete(systemPrompt, buildUserPrompt(request));
             return validator.validate(rawResponse, request);
         } catch (AiGradingException exception) {
             return GradingResult.failed(request, exception.getMessage());
@@ -61,6 +70,7 @@ public class AiGradingService {
         gradingMaterial.put("maxScore", request.maxScore());
         gradingMaterial.put("referenceAnswer", request.referenceAnswer());
         gradingMaterial.put("gradingCriteria", request.gradingCriteria());
+        gradingMaterial.put("rubricItems", request.rubricItems());
         gradingMaterial.put("studentAnswer", request.studentAnswer());
 
         try {

@@ -6,6 +6,7 @@ import java.util.List;
 public record GradingResult(
         Long questionId,
         BigDecimal maxScore,
+        GradingStatus gradingStatus,
         BigDecimal suggestedScore,
         String reason,
         BigDecimal actualScore,
@@ -26,6 +27,7 @@ public record GradingResult(
         return new GradingResult(
                 request.questionId(),
                 request.maxScore(),
+                GradingStatus.SUCCESS,
                 suggestedScore,
                 reason,
                 null,
@@ -39,10 +41,11 @@ public record GradingResult(
         return new GradingResult(
                 request.questionId(),
                 request.maxScore(),
+                GradingStatus.FAILED,
                 null,
                 null,
                 null,
-                ReviewStatus.FAILED,
+                ReviewStatus.PENDING,
                 List.of(),
                 failureMessage
         );

@@ -6,8 +6,10 @@ import com.example.ratingsystem.grading.ai.GradingResultValidator;
 import com.example.ratingsystem.grading.model.FillBlankGradingMode;
 import com.example.ratingsystem.grading.model.GradingRequest;
 import com.example.ratingsystem.grading.model.GradingResult;
+import com.example.ratingsystem.grading.model.GradingStatus;
 import com.example.ratingsystem.grading.model.QuestionType;
 import com.example.ratingsystem.grading.model.ReviewStatus;
+import com.example.ratingsystem.grading.model.RubricItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -15,6 +17,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -102,6 +105,50 @@ class GradingServiceTests {
     }
 
     @Test
+    void structuredRubricMatchesAiItemsByStableId() {
+        RecordingAiClient aiClient = new RecordingAiClient("""
+                {"items":[
+                  {"rubricItemId":101,"criterion":"概念","maxScore":4,"score":3,"reason":"基本正确"},
+                  {"rubricItemId":102,"criterion":"场景","maxScore":6,"score":5,"reason":"覆盖主要场景"}
+                ],"suggestedScore":8,"reason":"整体良好"}
+                """);
+        GradingService service = createService(aiClient);
+        GradingRequest request = new GradingRequest(
+                1L, QuestionType.SHORT_ANSWER, "测试题目", new BigDecimal("10"), "参考答案", null,
+                "学生答案", null,
+                List.of(
+                        new RubricItem(101L, "概念", new BigDecimal("4")),
+                        new RubricItem(102L, "场景", new BigDecimal("6"))
+                )
+        );
+
+        GradingResult result = service.grade(request);
+
+        assertEquals(ReviewStatus.PENDING, result.reviewStatus());
+        assertEquals(101L, result.criterionScores().get(0).rubricItemId());
+        assertTrue(aiClient.userPrompt.contains("\"id\":101"));
+    }
+
+    @Test
+    void structuredRubricRejectsUnknownItemId() {
+        GradingService service = createService((systemPrompt, userPrompt) -> """
+                {"items":[{"rubricItemId":999,"criterion":"评分点","maxScore":10,"score":8,"reason":"理由"}],
+                 "suggestedScore":8,"reason":"总评"}
+                """);
+        GradingRequest request = new GradingRequest(
+                1L, QuestionType.SHORT_ANSWER, "测试题目", new BigDecimal("10"), "参考答案", null,
+                "学生答案", null, List.of(new RubricItem(101L, "评分点", new BigDecimal("10")))
+        );
+
+        GradingResult result = service.grade(request);
+
+        assertEquals(GradingStatus.FAILED, result.gradingStatus());
+        assertEquals(ReviewStatus.PENDING, result.reviewStatus());
+        assertNull(result.suggestedScore());
+        assertTrue(result.failureMessage().contains("rubricItemId"));
+    }
+
+    @Test
     void aiFillBlankUsesAiRouteAndKeepsActualScoreEmpty() {
         RecordingAiClient aiClient = new RecordingAiClient("""
                 {
@@ -150,7 +197,8 @@ class GradingServiceTests {
                 null
         ));
 
-        assertEquals(ReviewStatus.FAILED, result.reviewStatus());
+        assertEquals(GradingStatus.FAILED, result.gradingStatus());
+        assertEquals(ReviewStatus.PENDING, result.reviewStatus());
         assertNull(result.suggestedScore());
         assertNull(result.actualScore());
         assertTrue(result.failureMessage().contains("得分之和"));
@@ -206,7 +254,8 @@ class GradingServiceTests {
                 null
         ));
 
-        assertEquals(ReviewStatus.FAILED, result.reviewStatus());
+        assertEquals(GradingStatus.FAILED, result.gradingStatus());
+        assertEquals(ReviewStatus.PENDING, result.reviewStatus());
         assertNull(result.suggestedScore());
         assertNull(result.actualScore());
         assertFalse(result.failureMessage().isBlank());
@@ -227,7 +276,8 @@ class GradingServiceTests {
                 FillBlankGradingMode.AI
         ));
 
-        assertEquals(ReviewStatus.FAILED, result.reviewStatus());
+        assertEquals(GradingStatus.FAILED, result.gradingStatus());
+        assertEquals(ReviewStatus.PENDING, result.reviewStatus());
         assertNull(result.suggestedScore());
         assertNull(result.actualScore());
         assertTrue(result.failureMessage().contains("超时"));
@@ -304,7 +354,8 @@ class GradingServiceTests {
                 referenceAnswer,
                 gradingCriteria,
                 studentAnswer,
-                fillBlankMode
+                fillBlankMode,
+                java.util.List.of()
         );
     }
 

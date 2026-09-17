@@ -1,0 +1,68 @@
+@baseUrl = http://localhost:8080
+
+### 1. 创建考试；短答题答案稍后留空，因此本验收文件不会调用 DeepSeek
+POST {{baseUrl}}/api/exams
+Content-Type: application/json
+
+{
+  "name": "第二阶段持久化验收",
+  "questions": [
+    {
+      "questionNo": 1,
+      "questionType": "CHOICE",
+      "content": "HTTP 默认端口是哪一个？",
+      "maxScore": 5,
+      "referenceAnswer": "80"
+    },
+    {
+      "questionNo": 2,
+      "questionType": "SHORT_ANSWER",
+      "content": "简述 TCP 的可靠传输机制。",
+      "maxScore": 5,
+      "referenceAnswer": "序号、确认、重传等机制。",
+      "rubricItems": [
+        {
+          "itemOrder": 1,
+          "name": "说明至少一种可靠传输机制",
+          "maxScore": 5
+        }
+      ]
+    }
+  ]
+}
+
+> {%
+  client.global.set("examId", response.body.id);
+  client.global.set("choiceQuestionId", response.body.questions[0].id);
+  client.global.set("shortQuestionId", response.body.questions[1].id);
+%}
+
+### 2. 提交结构化答案；空字符串明确表示短答题未作答，不会发起 AI 请求
+POST {{baseUrl}}/api/exams/{{examId}}/submissions
+Content-Type: application/json
+
+{
+  "studentNo": "20260001",
+  "studentName": "持久化验收学生",
+  "answers": [
+    {
+      "questionId": {{choiceQuestionId}},
+      "answerText": "80"
+    },
+    {
+      "questionId": {{shortQuestionId}},
+      "answerText": ""
+    }
+  ]
+}
+
+> {% client.global.set("submissionId", response.body.id); %}
+
+### 3. 自动评分并保存；预期两题 SUCCESS、actualScore 均为 null
+POST {{baseUrl}}/api/submissions/{{submissionId}}/grading
+
+### 4. 查询数据库中的评分结果
+GET {{baseUrl}}/api/submissions/{{submissionId}}/results
+
+### 5. 重启应用后再次执行本请求；结果应仍然存在
+GET {{baseUrl}}/api/submissions/{{submissionId}}/results

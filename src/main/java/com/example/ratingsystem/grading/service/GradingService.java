@@ -33,8 +33,8 @@ public class GradingService {
     }
 
     private GradingResult gradeWithAi(GradingRequest request) {
-        if (!StringUtils.hasText(request.gradingCriteria())) {
-            throw new InvalidGradingRequestException("AI 评分必须提供 gradingCriteria");
+        if (!StringUtils.hasText(request.gradingCriteria()) && request.rubricItems().isEmpty()) {
+            throw new InvalidGradingRequestException("AI 评分必须提供 gradingCriteria 或 rubricItems");
         }
         return aiGradingService.grade(request);
     }
