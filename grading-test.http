@@ -1,0 +1,13 @@
+POST http://localhost:8080/api/grading/suggestions
+Content-Type: application/json
+
+{
+  "questionId": 5,
+  "questionType": "SHORT_ANSWER",
+  "question": "简述 TCP 和 UDP 在连接方式和可靠性方面的区别。",
+  "maxScore": 10,
+  "referenceAnswer": "TCP 面向连接，提供可靠传输；UDP 无连接，不保证可靠传输。",
+  "gradingCriteria": "评分点1：指出 TCP 面向连接，2分。评分点2：指出 TCP 提供可靠传输，3分。评分点3：指出 UDP 无连接，2分。评分点4：指出 UDP 不保证可靠传输，3分。每个评分点独立给分，未涉及的评分点不得分，总分10分。",
+  "studentAnswer": "TCP 是面向连接的协议，而 UDP 是无连接的协议。",
+  "fillBlankGradingMode": null
+}
