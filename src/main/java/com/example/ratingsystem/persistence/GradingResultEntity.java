@@ -112,6 +112,11 @@ class GradingResultEntity {
         item.setGradingResult(this);
     }
 
+    void confirm(BigDecimal score) {
+        actualScore = score;
+        reviewStatus = PersistentReviewStatus.CONFIRMED;
+    }
+
     Long getId() {
         return id;
     }
@@ -154,5 +159,9 @@ class GradingResultEntity {
 
     Set<GradingResultItemEntity> getItems() {
         return items;
+    }
+
+    long getVersion() {
+        return version;
     }
 }

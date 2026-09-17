@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -19,6 +20,8 @@ import java.util.stream.Collectors;
 import static com.example.ratingsystem.persistence.PersistenceDtos.CriterionResultView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.GradeSubmissionView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.GradingResultView;
+import static com.example.ratingsystem.persistence.PersistenceDtos.ReviewAction;
+import static com.example.ratingsystem.persistence.PersistenceDtos.ReviewRequest;
 import static com.example.ratingsystem.persistence.PersistenceDtos.RubricItemView;
 
 @Service
@@ -76,6 +79,25 @@ public class PersistedGradingService {
         }
         execute(work);
         return getResult(resultId);
+    }
+
+    public GradingResultView review(Long resultId, ReviewRequest request) {
+        return transactions.execute(status -> {
+            GradingResultEntity result = resultRepository.findByIdForUpdate(resultId)
+                    .orElseThrow(() -> new PersistenceNotFoundException("评分结果不存在: " + resultId));
+            if (result.getVersion() != request.expectedVersion()) {
+                throw new PersistenceConflictException("评分结果已被其他审核操作修改，请重新查询后再提交");
+            }
+            if (result.getGradingStatus() != GradingStatus.SUCCESS) {
+                throw new PersistenceConflictException("只有自动评分成功的结果才能进行人工审核");
+            }
+
+            BigDecimal actualScore = resolveActualScore(result, request);
+            validateActualScore(actualScore, result.getStudentAnswer().getQuestion().getMaxScore());
+            result.confirm(actualScore);
+            resultRepository.flush();
+            return toView(result);
+        });
     }
 
     public List<GradingResultView> getResults(Long submissionId) {
@@ -221,11 +243,40 @@ public class PersistedGradingService {
                 )).toList(),
                 answer.getAnswerText(), result.getGradingStatus(), result.getSuggestedScore(), result.getReason(),
                 result.getFailureMessage(), result.getActualScore(), result.getReviewStatus(), result.getAttemptCount(),
+                result.getVersion(),
                 result.getItems().stream().map(item -> new CriterionResultView(
                         item.getRubricItem().getId(), item.getRubricItem().getName(), item.getMaxScore(),
                         item.getSuggestedScore(), item.getReason()
                 )).toList()
         );
+    }
+
+    private BigDecimal resolveActualScore(GradingResultEntity result, ReviewRequest request) {
+        if (request.action() == ReviewAction.ACCEPT_SUGGESTION) {
+            if (request.actualScore() != null) {
+                throw new PersistenceValidationException("接受建议分时不能同时提供 actualScore");
+            }
+            if (result.getSuggestedScore() == null) {
+                throw new PersistenceConflictException("当前评分结果没有可接受的建议分数");
+            }
+            return result.getSuggestedScore();
+        }
+        if (request.action() == ReviewAction.SET_SCORE) {
+            if (request.actualScore() == null) {
+                throw new PersistenceValidationException("手动评分必须提供 actualScore");
+            }
+            return request.actualScore();
+        }
+        throw new PersistenceValidationException("不支持的审核操作");
+    }
+
+    private void validateActualScore(BigDecimal actualScore, BigDecimal maxScore) {
+        if (actualScore.scale() > 2) {
+            throw new PersistenceValidationException("实际分数最多保留两位小数");
+        }
+        if (actualScore.signum() < 0 || actualScore.compareTo(maxScore) > 0) {
+            throw new PersistenceValidationException("实际分数必须在 0 到题目满分之间");
+        }
     }
 
     private Instant staleBefore() {

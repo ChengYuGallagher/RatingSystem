@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -17,6 +18,7 @@ import static com.example.ratingsystem.persistence.PersistenceDtos.CreateSubmiss
 import static com.example.ratingsystem.persistence.PersistenceDtos.ExamView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.GradeSubmissionView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.GradingResultView;
+import static com.example.ratingsystem.persistence.PersistenceDtos.ReviewRequest;
 import static com.example.ratingsystem.persistence.PersistenceDtos.SubmissionView;
 
 @RestController
@@ -57,5 +59,10 @@ public class PersistenceController {
     @PostMapping("/grading/results/{resultId}/retry")
     GradingResultView retry(@PathVariable Long resultId) {
         return gradingService.retry(resultId);
+    }
+
+    @PutMapping("/grading/results/{resultId}/review")
+    GradingResultView review(@PathVariable Long resultId, @Valid @RequestBody ReviewRequest request) {
+        return gradingService.review(resultId, request);
     }
 }

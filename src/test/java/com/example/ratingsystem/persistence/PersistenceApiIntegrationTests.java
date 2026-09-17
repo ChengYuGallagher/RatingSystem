@@ -14,16 +14,24 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -145,6 +153,179 @@ class PersistenceApiIntegrationTests {
                 .andExpect(status().isConflict());
     }
 
+    @Test
+    void acceptsSuggestionWithoutChangingOriginalAutomaticGradingDetails() throws Exception {
+        ExamIds exam = createExamWithChoiceAndShortAnswer();
+        long submissionId = createSubmission(exam, "2026010");
+        JsonNode original = performJson(post("/api/submissions/{id}/grading", submissionId))
+                .get("results").get(1);
+
+        JsonNode reviewed = performJson(put("/api/grading/results/{id}/review", original.get("id").longValue())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reviewBody("ACCEPT_SUGGESTION", null, original.get("version").longValue())));
+
+        assertEquals("CONFIRMED", reviewed.get("reviewStatus").stringValue());
+        assertScore("4", reviewed.get("actualScore"));
+        assertScore("4", reviewed.get("suggestedScore"));
+        assertEquals("主要内容正确", reviewed.get("reason").stringValue());
+        assertEquals(original.get("criterionScores"), reviewed.get("criterionScores"));
+        assertEquals(original.get("version").longValue() + 1, reviewed.get("version").longValue());
+    }
+
+    @Test
+    void setsAndCorrectsActualScoreUsingLatestVersion() throws Exception {
+        JsonNode original = createGradedShortAnswer("2026011").result();
+        long resultId = original.get("id").longValue();
+
+        JsonNode firstReview = performJson(put("/api/grading/results/{id}/review", resultId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reviewBody("SET_SCORE", "3.50", original.get("version").longValue())));
+        JsonNode corrected = performJson(put("/api/grading/results/{id}/review", resultId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reviewBody("SET_SCORE", "2.25", firstReview.get("version").longValue())));
+
+        assertScore("2.25", corrected.get("actualScore"));
+        assertScore("4", corrected.get("suggestedScore"));
+        assertEquals("CONFIRMED", corrected.get("reviewStatus").stringValue());
+        assertEquals(original.get("version").longValue() + 2, corrected.get("version").longValue());
+        assertEquals("主要内容正确", corrected.get("reason").stringValue());
+        assertEquals(original.get("criterionScores"), corrected.get("criterionScores"));
+    }
+
+    @Test
+    void rejectsInvalidReviewRequestsAndMissingResult() throws Exception {
+        JsonNode original = createGradedShortAnswer("2026012").result();
+        long resultId = original.get("id").longValue();
+        long version = original.get("version").longValue();
+
+        assertReviewStatus(resultId, reviewBody("SET_SCORE", "-0.01", version), 400);
+        assertReviewStatus(resultId, reviewBody("SET_SCORE", "5.01", version), 400);
+        assertReviewStatus(resultId, reviewBody("SET_SCORE", "1.001", version), 400);
+        assertReviewStatus(resultId, reviewBody("SET_SCORE", null, version), 400);
+        assertReviewStatus(resultId,
+                "{\"action\":\"ACCEPT_SUGGESTION\",\"actualScore\":4,\"expectedVersion\":"
+                        + version + "}", 400);
+        assertReviewStatus(resultId, "{\"expectedVersion\":" + version + "}", 400);
+        assertReviewStatus(resultId, reviewBody("SET_SCORE", "4", -1), 400);
+        assertReviewStatus(resultId, "{\"action\":\"SET_SCORE\",\"actualScore\":4}", 400);
+        assertReviewStatus(999999L, reviewBody("SET_SCORE", "4", 0), 404);
+    }
+
+    @Test
+    void rejectsReviewWhenAutomaticGradingHasFailedOrIsRunning() throws Exception {
+        ExamIds exam = createExamWithChoiceAndShortAnswer();
+        long submissionId = createSubmission(exam, "2026013");
+        aiClient.returnInvalidJson();
+        JsonNode failed = performJson(post("/api/submissions/{id}/grading", submissionId))
+                .get("results").get(1);
+
+        long version = failed.get("version").longValue();
+        assertReviewStatus(failed.get("id").longValue(), reviewBody("SET_SCORE", "3", version), 409);
+
+        jdbcTemplate.update("""
+                update grading_results
+                   set grading_status = 'RUNNING', running_since = CURRENT_TIMESTAMP
+                 where id = ?
+                """, failed.get("id").longValue());
+        assertReviewStatus(failed.get("id").longValue(), reviewBody("SET_SCORE", "3", version), 409);
+
+        JsonNode current = findResult(
+                performJson(get("/api/submissions/{id}/results", submissionId)),
+                failed.get("id").longValue());
+        assertTrue(current.get("actualScore").isNull());
+        assertEquals("PENDING", current.get("reviewStatus").stringValue());
+    }
+
+    @Test
+    void returnsConflictForStaleVersionAndKeepsCommittedReview() throws Exception {
+        GradedAnswer graded = createGradedShortAnswer("2026014");
+        JsonNode original = graded.result();
+        long resultId = original.get("id").longValue();
+        long originalVersion = original.get("version").longValue();
+
+        JsonNode accepted = performJson(put("/api/grading/results/{id}/review", resultId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reviewBody("SET_SCORE", "3.50", originalVersion)));
+        assertEquals(originalVersion + 1, accepted.get("version").longValue());
+
+        assertReviewStatus(resultId, reviewBody("SET_SCORE", "2", originalVersion), 409);
+
+        JsonNode current = findResult(
+                performJson(get("/api/submissions/{id}/results", graded.submissionId())), resultId);
+        assertScore("3.50", current.get("actualScore"));
+        assertEquals("CONFIRMED", current.get("reviewStatus").stringValue());
+        assertEquals(originalVersion + 1, current.get("version").longValue());
+    }
+
+    @Test
+    void concurrentReviewsDoNotSilentlyOverwriteEachOther() throws Exception {
+        GradedAnswer graded = createGradedShortAnswer("2026015");
+        JsonNode original = graded.result();
+        long resultId = original.get("id").longValue();
+        long originalVersion = original.get("version").longValue();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<MvcResult> first = executor.submit(() -> performConcurrentReview(
+                    resultId, "3.25", originalVersion, ready, start));
+            Future<MvcResult> second = executor.submit(() -> performConcurrentReview(
+                    resultId, "2.75", originalVersion, ready, start));
+            assertTrue(ready.await(5, TimeUnit.SECONDS), "两个并发请求应准备就绪");
+            start.countDown();
+
+            MvcResult firstResult = first.get(10, TimeUnit.SECONDS);
+            MvcResult secondResult = second.get(10, TimeUnit.SECONDS);
+            int firstStatus = firstResult.getResponse().getStatus();
+            int secondStatus = secondResult.getResponse().getStatus();
+            assertTrue((firstStatus == 200 && secondStatus == 409)
+                            || (firstStatus == 409 && secondStatus == 200),
+                    "并发审核必须恰好一个成功、一个版本冲突");
+
+            MvcResult successful = firstStatus == 200 ? firstResult : secondResult;
+            JsonNode successfulBody = objectMapper.readTree(
+                    successful.getResponse().getContentAsString(StandardCharsets.UTF_8));
+            JsonNode current = findResult(
+                    performJson(get("/api/submissions/{id}/results", graded.submissionId())), resultId);
+            assertEquals(successfulBody.get("actualScore"), current.get("actualScore"));
+            assertEquals("CONFIRMED", current.get("reviewStatus").stringValue());
+            assertEquals(originalVersion + 1, successfulBody.get("version").longValue());
+            assertEquals(originalVersion + 1, current.get("version").longValue());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void repeatedAutomaticGradingAndRetryCannotChangeConfirmedReviewOrCallAiAgain() throws Exception {
+        ExamIds exam = createExamWithChoiceAndShortAnswer();
+        long submissionId = createSubmission(exam, "2026016");
+        JsonNode original = performJson(post("/api/submissions/{id}/grading", submissionId))
+                .get("results").get(1);
+        long resultId = original.get("id").longValue();
+
+        JsonNode reviewed = performJson(put("/api/grading/results/{id}/review", resultId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reviewBody("SET_SCORE", "3.50", original.get("version").longValue())));
+        assertEquals(1, aiClient.calls());
+
+        JsonNode repeated = findResult(
+                performJson(post("/api/submissions/{id}/grading", submissionId)).get("results"), resultId);
+        assertScore("3.50", repeated.get("actualScore"));
+        assertEquals("CONFIRMED", repeated.get("reviewStatus").stringValue());
+        assertEquals(reviewed.get("version"), repeated.get("version"));
+        assertEquals(1, aiClient.calls(), "审核后的重复评分不能产生新的 AI 调用");
+
+        mockMvc.perform(post("/api/grading/results/{id}/retry", resultId))
+                .andExpect(status().isConflict());
+        JsonNode afterRetry = findResult(
+                performJson(get("/api/submissions/{id}/results", submissionId)), resultId);
+        assertScore("3.50", afterRetry.get("actualScore"));
+        assertEquals("CONFIRMED", afterRetry.get("reviewStatus").stringValue());
+        assertEquals(1, aiClient.calls());
+    }
+
     private ExamIds createExamWithChoiceAndShortAnswer() throws Exception {
         JsonNode created = performJson(post("/api/exams")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -169,6 +350,41 @@ class PersistenceApiIntegrationTests {
         return performJson(post("/api/exams/{id}/submissions", exam.examId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(submissionJson(exam, studentNo))).get("id").longValue();
+    }
+
+    private GradedAnswer createGradedShortAnswer(String studentNo) throws Exception {
+        ExamIds exam = createExamWithChoiceAndShortAnswer();
+        long submissionId = createSubmission(exam, studentNo);
+        JsonNode result = performJson(post("/api/submissions/{id}/grading", submissionId))
+                .get("results").get(1);
+        return new GradedAnswer(submissionId, result);
+    }
+
+    private String reviewBody(String action, String actualScore, long expectedVersion) {
+        String scoreProperty = actualScore == null ? "" : ",\"actualScore\":" + actualScore;
+        return "{\"action\":\"%s\"%s,\"expectedVersion\":%d}"
+                .formatted(action, scoreProperty, expectedVersion);
+    }
+
+    private void assertReviewStatus(long resultId, String body, int expectedStatus) throws Exception {
+        mockMvc.perform(put("/api/grading/results/{id}/review", resultId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().is(expectedStatus));
+    }
+
+    private MvcResult performConcurrentReview(long resultId, String actualScore, long expectedVersion,
+                                              CountDownLatch ready, CountDownLatch start) throws Exception {
+        ready.countDown();
+        assertTrue(start.await(5, TimeUnit.SECONDS), "并发审核应同时开始");
+        return mockMvc.perform(put("/api/grading/results/{id}/review", resultId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reviewBody("SET_SCORE", actualScore, expectedVersion)))
+                .andReturn();
+    }
+
+    private void assertScore(String expected, JsonNode actual) {
+        assertEquals(0, actual.decimalValue().compareTo(new BigDecimal(expected)));
     }
 
     private String submissionJson(ExamIds exam, String studentNo) {
@@ -198,6 +414,9 @@ class PersistenceApiIntegrationTests {
     }
 
     private record ExamIds(long examId, long choiceQuestionId, long shortQuestionId, long rubricItemId) {
+    }
+
+    private record GradedAnswer(long submissionId, JsonNode result) {
     }
 
     @TestConfiguration(proxyBeanMethods = false)

@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
@@ -88,6 +89,18 @@ public final class PersistenceDtos {
     public record GradeSubmissionView(Long submissionId, List<GradingResultView> results) {
     }
 
+    public enum ReviewAction {
+        ACCEPT_SUGGESTION,
+        SET_SCORE
+    }
+
+    public record ReviewRequest(
+            @NotNull ReviewAction action,
+            @DecimalMin(value = "0") @Digits(integer = 6, fraction = 2) BigDecimal actualScore,
+            @NotNull @PositiveOrZero Long expectedVersion
+    ) {
+    }
+
     public record GradingResultView(
             Long id,
             Long answerId,
@@ -107,6 +120,7 @@ public final class PersistenceDtos {
             BigDecimal actualScore,
             PersistentReviewStatus reviewStatus,
             int attemptCount,
+            long version,
             List<CriterionResultView> criterionScores
     ) {
     }

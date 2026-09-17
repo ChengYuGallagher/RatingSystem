@@ -1,0 +1,103 @@
+@baseUrl = http://localhost:8080
+
+### 1. 创建仅含选择题的考试；整套验收不会调用 DeepSeek
+POST {{baseUrl}}/api/exams
+Content-Type: application/json
+
+{
+  "name": "里程碑 B 人工审核验收",
+  "questions": [
+    {
+      "questionNo": 1,
+      "questionType": "CHOICE",
+      "content": "HTTP 默认端口是哪一个？",
+      "maxScore": 5,
+      "referenceAnswer": "80"
+    }
+  ]
+}
+
+> {%
+  client.global.set("reviewExamId", response.body.id);
+  client.global.set("reviewQuestionId", response.body.questions[0].id);
+%}
+
+### 2. 创建结构化答卷
+POST {{baseUrl}}/api/exams/{{reviewExamId}}/submissions
+Content-Type: application/json
+
+{
+  "studentNo": "review-{{$random.uuid}}",
+  "studentName": "人工审核验收学生",
+  "answers": [
+    {
+      "questionId": {{reviewQuestionId}},
+      "answerText": "80"
+    }
+  ]
+}
+
+> {% client.global.set("reviewSubmissionId", response.body.id); %}
+
+### 3. 自动评分；记录 resultId 和服务端当前 version
+POST {{baseUrl}}/api/submissions/{{reviewSubmissionId}}/grading
+
+> {%
+  client.global.set("reviewResultId", response.body.results[0].id);
+  client.global.set("initialReviewVersion", response.body.results[0].version);
+%}
+
+### 4. 查询审核材料；应含题目、标准答案、学生答案、建议分、理由和 version
+GET {{baseUrl}}/api/submissions/{{reviewSubmissionId}}/results
+
+### 5. 接受建议分；预期 actualScore=5、reviewStatus=CONFIRMED、version 递增
+PUT {{baseUrl}}/api/grading/results/{{reviewResultId}}/review
+Content-Type: application/json
+
+{
+  "action": "ACCEPT_SUGGESTION",
+  "expectedVersion": {{initialReviewVersion}}
+}
+
+> {% client.global.set("confirmedReviewVersion", response.body.version); %}
+
+### 6. 使用最新版本纠正实际分；建议分和理由不得改变
+PUT {{baseUrl}}/api/grading/results/{{reviewResultId}}/review
+Content-Type: application/json
+
+{
+  "action": "SET_SCORE",
+  "actualScore": 4.50,
+  "expectedVersion": {{confirmedReviewVersion}}
+}
+
+> {% client.global.set("revisedReviewVersion", response.body.version); %}
+
+### 7. 使用旧版本再次修改；预期 HTTP 409，且 4.50 不被覆盖
+PUT {{baseUrl}}/api/grading/results/{{reviewResultId}}/review
+Content-Type: application/json
+
+{
+  "action": "SET_SCORE",
+  "actualScore": 3,
+  "expectedVersion": {{initialReviewVersion}}
+}
+
+### 8. 提交超过题目满分的分数；预期 HTTP 400
+PUT {{baseUrl}}/api/grading/results/{{reviewResultId}}/review
+Content-Type: application/json
+
+{
+  "action": "SET_SCORE",
+  "actualScore": 5.01,
+  "expectedVersion": {{revisedReviewVersion}}
+}
+
+### 9. 再次执行普通自动评分；不得改变 actualScore、reviewStatus、version
+POST {{baseUrl}}/api/submissions/{{reviewSubmissionId}}/grading
+
+### 10. 最终查询；应保持 actualScore=4.50、reviewStatus=CONFIRMED
+GET {{baseUrl}}/api/submissions/{{reviewSubmissionId}}/results
+
+### 11. 完全重启 Spring Boot 后再次执行；审核结果应仍然存在
+GET {{baseUrl}}/api/submissions/{{reviewSubmissionId}}/results
