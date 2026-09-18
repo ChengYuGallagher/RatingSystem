@@ -1,0 +1,130 @@
+@baseUrl = http://localhost:8080
+
+### 1. 创建三道选择题，总分 20；本文件不会调用 DeepSeek
+POST {{baseUrl}}/api/exams
+Content-Type: application/json
+
+{
+  "name": "里程碑 C 成绩汇总验收",
+  "questions": [
+    {
+      "questionNo": 1,
+      "questionType": "CHOICE",
+      "content": "第一题",
+      "maxScore": 5,
+      "referenceAnswer": "A"
+    },
+    {
+      "questionNo": 2,
+      "questionType": "CHOICE",
+      "content": "第二题",
+      "maxScore": 10,
+      "referenceAnswer": "B"
+    },
+    {
+      "questionNo": 3,
+      "questionType": "CHOICE",
+      "content": "第三题",
+      "maxScore": 5,
+      "referenceAnswer": "C"
+    }
+  ]
+}
+
+> {%
+  client.global.set("summaryExamId", response.body.id);
+  client.global.set("summaryQuestion1", response.body.questions[0].id);
+  client.global.set("summaryQuestion2", response.body.questions[1].id);
+  client.global.set("summaryQuestion3", response.body.questions[2].id);
+%}
+
+### 2. 创建完整答卷
+POST {{baseUrl}}/api/exams/{{summaryExamId}}/submissions
+Content-Type: application/json
+
+{
+  "studentNo": "summary-{{$random.uuid}}",
+  "studentName": "成绩汇总验收学生",
+  "answers": [
+    {"questionId": {{summaryQuestion1}}, "answerText": "A"},
+    {"questionId": {{summaryQuestion2}}, "answerText": "B"},
+    {"questionId": {{summaryQuestion3}}, "answerText": "C"}
+  ]
+}
+
+> {% client.global.set("summarySubmissionId", response.body.id); %}
+
+### 3. 评分前查询；预期 INCOMPLETE、gradingResultCount=0、finalScore=null
+GET {{baseUrl}}/api/submissions/{{summarySubmissionId}}/summary
+
+### 4. 自动评分并保存三个结果；仍不得把建议分当成正式分
+POST {{baseUrl}}/api/submissions/{{summarySubmissionId}}/grading
+
+> {%
+  client.global.set("summaryResult1", response.body.results[0].id);
+  client.global.set("summaryVersion1", response.body.results[0].version);
+  client.global.set("summaryResult2", response.body.results[1].id);
+  client.global.set("summaryVersion2", response.body.results[1].version);
+  client.global.set("summaryResult3", response.body.results[2].id);
+  client.global.set("summaryVersion3", response.body.results[2].version);
+%}
+
+### 5. 建议分已存在但尚未审核；预期 confirmedScore=0、finalScore=null
+GET {{baseUrl}}/api/submissions/{{summarySubmissionId}}/summary
+
+### 6. 第一题确认 5 分
+PUT {{baseUrl}}/api/grading/results/{{summaryResult1}}/review
+Content-Type: application/json
+
+{
+  "action": "SET_SCORE",
+  "actualScore": 5,
+  "expectedVersion": {{summaryVersion1}}
+}
+
+### 7. 第二题确认 8 分，并保存后续改分所需的新版本
+PUT {{baseUrl}}/api/grading/results/{{summaryResult2}}/review
+Content-Type: application/json
+
+{
+  "action": "SET_SCORE",
+  "actualScore": 8,
+  "expectedVersion": {{summaryVersion2}}
+}
+
+> {% client.global.set("summaryReviewedVersion2", response.body.version); %}
+
+### 8. 部分审核汇总；预期 confirmedScore=13、INCOMPLETE、finalScore=null
+GET {{baseUrl}}/api/submissions/{{summarySubmissionId}}/summary
+
+### 9. 第三题确认 4 分
+PUT {{baseUrl}}/api/grading/results/{{summaryResult3}}/review
+Content-Type: application/json
+
+{
+  "action": "SET_SCORE",
+  "actualScore": 4,
+  "expectedVersion": {{summaryVersion3}}
+}
+
+### 10. 全部审核汇总；预期 confirmedScore=17、COMPLETE、finalScore=17
+GET {{baseUrl}}/api/submissions/{{summarySubmissionId}}/summary
+
+### 11. 将第二题从 8 分修改为 7 分
+PUT {{baseUrl}}/api/grading/results/{{summaryResult2}}/review
+Content-Type: application/json
+
+{
+  "action": "SET_SCORE",
+  "actualScore": 7,
+  "expectedVersion": {{summaryReviewedVersion2}}
+}
+
+### 12. 实时汇总应更新为 confirmedScore=16、finalScore=16
+GET {{baseUrl}}/api/submissions/{{summarySubmissionId}}/summary
+
+### 13. 无数据变化时重复查询；结果应与第 12 步一致
+GET {{baseUrl}}/api/submissions/{{summarySubmissionId}}/summary
+
+### 14. 完全重启 Spring Boot 后再次查询；结果仍应为 COMPLETE、finalScore=16
+GET {{baseUrl}}/api/submissions/{{summarySubmissionId}}/summary

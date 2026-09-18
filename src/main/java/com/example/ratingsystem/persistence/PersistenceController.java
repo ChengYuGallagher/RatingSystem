@@ -19,6 +19,7 @@ import static com.example.ratingsystem.persistence.PersistenceDtos.ExamView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.GradeSubmissionView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.GradingResultView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.ReviewRequest;
+import static com.example.ratingsystem.persistence.PersistenceDtos.SubmissionScoreSummaryView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.SubmissionView;
 
 @RestController
@@ -27,10 +28,13 @@ public class PersistenceController {
 
     private final ExamPersistenceService examService;
     private final PersistedGradingService gradingService;
+    private final SubmissionScoreSummaryService summaryService;
 
-    public PersistenceController(ExamPersistenceService examService, PersistedGradingService gradingService) {
+    public PersistenceController(ExamPersistenceService examService, PersistedGradingService gradingService,
+                                 SubmissionScoreSummaryService summaryService) {
         this.examService = examService;
         this.gradingService = gradingService;
+        this.summaryService = summaryService;
     }
 
     @PostMapping("/exams")
@@ -64,5 +68,10 @@ public class PersistenceController {
     @PutMapping("/grading/results/{resultId}/review")
     GradingResultView review(@PathVariable Long resultId, @Valid @RequestBody ReviewRequest request) {
         return gradingService.review(resultId, request);
+    }
+
+    @GetMapping("/submissions/{submissionId}/summary")
+    SubmissionScoreSummaryView getSummary(@PathVariable Long submissionId) {
+        return summaryService.getSummary(submissionId);
     }
 }

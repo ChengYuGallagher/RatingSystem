@@ -101,6 +101,31 @@ public final class PersistenceDtos {
     ) {
     }
 
+    public enum ScoreSummaryStatus {
+        INCOMPLETE,
+        COMPLETE
+    }
+
+    public record SubmissionScoreSummaryView(
+            Long examId,
+            String examName,
+            Long submissionId,
+            Long studentId,
+            String studentNo,
+            String studentName,
+            BigDecimal examMaxScore,
+            int questionCount,
+            int answerRecordCount,
+            int gradingResultCount,
+            int successfullyGradedQuestionCount,
+            int confirmedQuestionCount,
+            int unconfirmedQuestionCount,
+            BigDecimal confirmedScore,
+            ScoreSummaryStatus completionStatus,
+            BigDecimal finalScore
+    ) {
+    }
+
     public record GradingResultView(
             Long id,
             Long answerId,
