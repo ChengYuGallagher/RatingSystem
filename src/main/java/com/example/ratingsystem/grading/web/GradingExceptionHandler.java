@@ -1,5 +1,6 @@
 package com.example.ratingsystem.grading.web;
 
+import com.example.ratingsystem.answerimport.AnswerImportException;
 import com.example.ratingsystem.grading.service.InvalidGradingRequestException;
 import com.example.ratingsystem.persistence.PersistenceConflictException;
 import com.example.ratingsystem.persistence.PersistenceNotFoundException;
@@ -12,6 +13,13 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GradingExceptionHandler {
+
+    @ExceptionHandler(AnswerImportException.class)
+    ProblemDetail handleAnswerImport(AnswerImportException exception) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, exception.getMessage());
+        problem.setTitle("答卷导入请求不合法");
+        return problem;
+    }
 
     @ExceptionHandler(InvalidGradingRequestException.class)
     ProblemDetail handleInvalidRequest(InvalidGradingRequestException exception) {

@@ -1,0 +1,25 @@
+@baseUrl = http://localhost:8080
+
+### DOCX 单份答卷预览：只解析，不评分、不写数据库、不调用 DeepSeek
+POST {{baseUrl}}/api/answer-import/preview
+Content-Type: multipart/form-data; boundary=RatingSystemAnswerImportBoundary
+
+--RatingSystemAnswerImportBoundary
+Content-Disposition: form-data; name="structure"
+Content-Type: application/json
+
+{
+  "sections": [
+    {"questionType": "CHOICE", "questionCount": 20},
+    {"questionType": "FILL_BLANK", "questionCount": 10},
+    {"questionType": "TRUE_FALSE", "questionCount": 10},
+    {"questionType": "SHORT_ANSWER", "questionCount": 1},
+    {"questionType": "PROGRAMMING", "questionCount": 1}
+  ]
+}
+--RatingSystemAnswerImportBoundary
+Content-Disposition: form-data; name="file"; filename="244071101_张三.docx"
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+
+< ./test-files/docx/244071101_张三.docx
+--RatingSystemAnswerImportBoundary--
