@@ -8,13 +8,14 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "exams")
@@ -30,7 +31,8 @@ class ExamEntity {
     private ExamStatus status = ExamStatus.DRAFT;
 
     @OneToMany(mappedBy = "exam", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<QuestionEntity> questions = new ArrayList<>();
+    @OrderBy("questionNo ASC")
+    private Set<QuestionEntity> questions = new LinkedHashSet<>();
 
     @CreationTimestamp
     private Instant createdAt;
@@ -66,7 +68,7 @@ class ExamEntity {
         return status;
     }
 
-    List<QuestionEntity> getQuestions() {
+    Set<QuestionEntity> getQuestions() {
         return questions;
     }
 }

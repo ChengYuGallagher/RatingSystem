@@ -22,6 +22,7 @@ public class GradingService {
             case CHOICE, TRUE_FALSE -> exactMatchGrader.grade(request);
             case FILL_BLANK -> gradeFillBlank(request);
             case SHORT_ANSWER -> gradeWithAi(request);
+            case PROGRAMMING -> GradingResult.failed(request, "编程题当前仅保存文本答案，不支持自动评分");
         };
     }
 

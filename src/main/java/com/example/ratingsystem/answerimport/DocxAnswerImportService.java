@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -27,6 +29,7 @@ import static com.example.ratingsystem.answerimport.AnswerImportDtos.ImportStruc
 import static com.example.ratingsystem.answerimport.AnswerImportDtos.ParseStatus;
 import static com.example.ratingsystem.answerimport.AnswerImportDtos.ParsedAnswer;
 import static com.example.ratingsystem.answerimport.AnswerImportDtos.SectionSpec;
+import static com.example.ratingsystem.answerimport.AnswerImportDtos.StudentIdentity;
 import static com.example.ratingsystem.answerimport.AnswerImportDtos.UnassignedTextRange;
 
 @Service
@@ -48,9 +51,30 @@ public class DocxAnswerImportService {
                     + "(?:\\s*[（(][^）)]*[）)])?\\s*$");
 
     public AnswerImportPreview preview(MultipartFile file, ImportStructureRequest structure) {
-        StudentIdentity identity = validateFileAndReadIdentity(file);
+        if (file == null || file.isEmpty()) {
+            throw new AnswerImportException("必须上传非空 DOCX 文件");
+        }
+        if (file.getSize() > MAX_FILE_SIZE) {
+            throw new AnswerImportException("DOCX 文件不能超过 10 MB");
+        }
+        try {
+            return preview(file.getOriginalFilename(), file.getBytes(), structure);
+        } catch (IOException exception) {
+            throw new AnswerImportException("读取 DOCX 文件失败", exception);
+        }
+    }
+
+    public AnswerImportPreview preview(String originalFilename, byte[] content,
+                                       ImportStructureRequest structure) {
+        StudentIdentity identity = identify(originalFilename);
+        if (content == null || content.length == 0) {
+            throw new AnswerImportException("必须上传非空 DOCX 文件");
+        }
+        if (content.length > MAX_FILE_SIZE) {
+            throw new AnswerImportException("DOCX 文件不能超过 10 MB");
+        }
         List<ExpectedQuestion> expectedQuestions = buildExpectedQuestions(structure);
-        List<TextBlock> blocks = readBlocks(file);
+        List<TextBlock> blocks = readBlocks(content);
         List<NumberedBlock> candidates = findCandidates(blocks);
         Alignment alignment = align(expectedQuestions, candidates);
         boolean exactSequence = hasExactNumberSequence(expectedQuestions, candidates);
@@ -175,14 +199,8 @@ public class DocxAnswerImportService {
                 List.copyOf(unassignedTextRanges), List.copyOf(globalIssues));
     }
 
-    private StudentIdentity validateFileAndReadIdentity(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
-            throw new AnswerImportException("必须上传非空 DOCX 文件");
-        }
-        if (file.getSize() > MAX_FILE_SIZE) {
-            throw new AnswerImportException("DOCX 文件不能超过 10 MB");
-        }
-        String filename = cleanFilename(file.getOriginalFilename());
+    public StudentIdentity identify(String originalFilename) {
+        String filename = cleanFilename(originalFilename);
         Matcher matcher = FILE_NAME_PATTERN.matcher(filename);
         if (!matcher.matches()) {
             throw new AnswerImportException("文件名必须符合 学号_姓名.docx，例如 244071101_张三.docx");
@@ -227,8 +245,8 @@ public class DocxAnswerImportService {
         return expected;
     }
 
-    private List<TextBlock> readBlocks(MultipartFile file) {
-        try (InputStream inputStream = file.getInputStream();
+    private List<TextBlock> readBlocks(byte[] content) {
+        try (InputStream inputStream = new ByteArrayInputStream(content);
              XWPFDocument document = new XWPFDocument(inputStream)) {
             List<TextBlock> blocks = new ArrayList<>();
             Map<NumberingKey, Integer> numberingCounters = new LinkedHashMap<>();
@@ -528,9 +546,6 @@ public class DocxAnswerImportService {
 
     private ImportIssue issue(String code, String message, ImportQuestionType type, int questionNo) {
         return new ImportIssue(code, message, type, questionNo);
-    }
-
-    private record StudentIdentity(String studentNo, String studentName, String filename) {
     }
 
     private record TextBlock(String text, Integer automaticNumber) {

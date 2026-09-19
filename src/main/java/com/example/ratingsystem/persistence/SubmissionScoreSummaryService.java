@@ -5,6 +5,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -34,7 +35,7 @@ public class SubmissionScoreSummaryService {
         ExamSubmissionEntity submission = submissionRepository.findDetailedById(submissionId)
                 .orElseThrow(() -> new PersistenceNotFoundException("答卷不存在: " + submissionId));
         ExamEntity exam = submission.getExam();
-        List<QuestionEntity> questions = exam.getQuestions();
+        Collection<QuestionEntity> questions = exam.getQuestions();
 
         Map<Long, QuestionEntity> questionsById = new HashMap<>();
         boolean associationsValid = true;

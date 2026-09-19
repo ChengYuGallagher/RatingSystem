@@ -49,6 +49,9 @@ public final class AnswerImportDtos {
     ) {
     }
 
+    public record StudentIdentity(String studentNo, String studentName, String filename) {
+    }
+
     public record ParsedAnswer(
             Long questionId,
             ImportQuestionType questionType,

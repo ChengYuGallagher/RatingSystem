@@ -1,0 +1,60 @@
+@baseUrl = http://localhost:8080
+@examId = 5
+
+### 1. 上传全班 ZIP 并保存批量预览
+# 请把真实 ZIP 放到 test-files/batch/class-answers.zip；该目录下 ZIP 已被 Git 忽略。
+POST {{baseUrl}}/api/exams/{{examId}}/answer-import/batches/preview
+Content-Type: multipart/form-data; boundary=BatchBoundary
+
+--BatchBoundary
+Content-Disposition: form-data; name="file"; filename="class-answers.zip"
+Content-Type: application/zip
+
+< ./test-files/batch/class-answers.zip
+--BatchBoundary--
+
+> {%
+    client.global.set("batchId", response.body.id);
+    const student = response.body.students[0];
+    client.global.set("studentImportId", student.id);
+    client.global.set("studentNo", student.studentNo);
+    client.global.set("studentName", student.studentName);
+    client.global.set("studentVersion", student.version);
+    client.global.set("correctedAnswers", JSON.stringify(student.answers.map(a => ({
+        answerId: a.id,
+        questionId: a.questionId,
+        answerText: a.rawAnswer === null ? "" : a.rawAnswer
+    }))));
+%}
+
+### 2. 重启应用后也可用同一 batchId 查询持久化预览
+GET {{baseUrl}}/api/answer-import/batches/{{batchId}}
+
+### 3. 修正第一名学生身份、题目映射或答案文本
+# correctedAnswers 默认沿用预览结果；可在发送前直接修改生成出的 JSON。
+PUT {{baseUrl}}/api/answer-import/batches/{{batchId}}/students/{{studentImportId}}
+Content-Type: application/json
+
+{
+  "studentNo": "{{studentNo}}",
+  "studentName": "{{studentName}}",
+  "expectedVersion": {{studentVersion}},
+  "answers": {{correctedAnswers}}
+}
+
+> {% client.global.set("confirmedVersion", response.body.version); %}
+
+### 4. 教师确认该学生解析结果
+POST {{baseUrl}}/api/answer-import/batches/1/students/1/confirm
+Content-Type: application/json
+
+{
+  "expectedVersion": 0
+}
+
+### 5. 正式导入该批次中所有已确认学生
+# 未确认学生不会导入；失败学生不会阻塞其他已确认学生。
+POST {{baseUrl}}/api/answer-import/batches/1/import
+
+### 6. 查询最终导入状态和 submissionId
+GET http://localhost:8080/api/answer-import/batches/1

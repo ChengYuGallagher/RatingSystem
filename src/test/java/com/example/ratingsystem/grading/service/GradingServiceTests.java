@@ -56,6 +56,20 @@ class GradingServiceTests {
     }
 
     @Test
+    void programmingQuestionIsStoredForManualHandlingWithoutCallingAi() {
+        GradingService service = createService((systemPrompt, userPrompt) -> {
+            throw new AssertionError("编程题当前不应调用 AI");
+        });
+
+        GradingResult result = service.grade(request(
+                QuestionType.PROGRAMMING, "10", "参考代码", "不会", null, null));
+
+        assertEquals(GradingStatus.FAILED, result.gradingStatus());
+        assertNull(result.suggestedScore());
+        assertTrue(result.failureMessage().contains("不支持自动评分"));
+    }
+
+    @Test
     void fillBlankDefaultsToExactMatch() {
         GradingService service = createService((systemPrompt, userPrompt) -> {
             throw new AssertionError("精确比对填空题不应调用 AI");

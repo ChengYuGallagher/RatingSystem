@@ -95,6 +95,13 @@ public class ExamPersistenceService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public ExamView getExam(Long examId) {
+        return examRepository.findDetailedById(examId)
+                .map(this::toExamView)
+                .orElseThrow(() -> new PersistenceNotFoundException("考试不存在: " + examId));
+    }
+
     private void validateQuestions(CreateExamRequest request) {
         Set<Integer> questionNumbers = new HashSet<>();
         for (QuestionInput question : request.questions()) {

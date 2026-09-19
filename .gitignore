@@ -34,3 +34,4 @@ build/
 
 ### Local answer-import samples ###
 /test-files/docx/*.docx
+/test-files/batch/*.zip
