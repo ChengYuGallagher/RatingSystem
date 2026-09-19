@@ -105,6 +105,14 @@ public class BatchAnswerImportService {
         return toView(findBatch(batchId));
     }
 
+    @Transactional(readOnly = true)
+    public BatchImportView getLatestBatch(Long examId) {
+        examService.getExam(examId);
+        BatchImportEntity batch = batchRepository.findFirstByExamIdOrderByIdDesc(examId)
+                .orElseThrow(() -> new PersistenceNotFoundException("该考试尚无批量答卷导入记录"));
+        return toView(batch);
+    }
+
     @Transactional
     public BatchStudentView updateStudent(Long batchId, Long studentImportId,
                                           UpdateBatchStudentRequest request) {

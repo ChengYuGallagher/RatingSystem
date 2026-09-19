@@ -248,8 +248,8 @@ class SubmissionScoreSummaryIntegrationTests {
     @Test
     void zeroQuestionExamCannotProduceZeroPointFinalScore() throws Exception {
         jdbcTemplate.update("""
-                insert into exams (name, status, created_at, updated_at)
-                values ('零题考试', 'DRAFT', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                insert into exams (name, status, standards_reviewed, created_at, updated_at)
+                values ('零题考试', 'DRAFT', false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """);
         Long examId = jdbcTemplate.queryForObject("select id from exams where name = '零题考试'", Long.class);
         jdbcTemplate.update("""

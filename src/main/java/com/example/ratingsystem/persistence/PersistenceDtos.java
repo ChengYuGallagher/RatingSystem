@@ -13,6 +13,7 @@ import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 public final class PersistenceDtos {
@@ -48,15 +49,41 @@ public final class PersistenceDtos {
     ) {
     }
 
-    public record ExamView(Long id, String name, ExamStatus status, List<QuestionView> questions) {
+    public record UpdateQuestionStandardsRequest(
+            @NotBlank @Size(max = 10_000) String referenceAnswer,
+            @NotNull @DecimalMin(value = "0", inclusive = false) @Digits(integer = 6, fraction = 2) BigDecimal maxScore,
+            @Size(max = 10_000) String gradingCriteria,
+            List<@Valid RubricItemInput> rubricItems
+    ) {
+        public UpdateQuestionStandardsRequest {
+            rubricItems = rubricItems == null ? List.of() : List.copyOf(rubricItems);
+        }
+    }
+
+    public record ExamView(Long id, String name, ExamStatus status, boolean standardsReviewed,
+                           Instant standardsReviewedAt, List<QuestionView> questions) {
     }
 
     public record QuestionView(
             Long id,
             int questionNo,
             QuestionType questionType,
+            String content,
             BigDecimal maxScore,
+            String referenceAnswer,
+            String gradingCriteria,
+            FillBlankGradingMode fillBlankGradingMode,
             List<RubricItemView> rubricItems
+    ) {
+    }
+
+    public record ExamListItemView(
+            Long id,
+            String name,
+            ExamStatus status,
+            boolean standardsReviewed,
+            int questionCount,
+            BigDecimal maxScore
     ) {
     }
 

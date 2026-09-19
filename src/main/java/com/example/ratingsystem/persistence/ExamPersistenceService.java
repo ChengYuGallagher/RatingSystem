@@ -8,6 +8,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -18,10 +20,12 @@ import static com.example.ratingsystem.persistence.PersistenceDtos.AnswerInput;
 import static com.example.ratingsystem.persistence.PersistenceDtos.CreateExamRequest;
 import static com.example.ratingsystem.persistence.PersistenceDtos.CreateSubmissionRequest;
 import static com.example.ratingsystem.persistence.PersistenceDtos.ExamView;
+import static com.example.ratingsystem.persistence.PersistenceDtos.ExamListItemView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.QuestionInput;
 import static com.example.ratingsystem.persistence.PersistenceDtos.QuestionView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.RubricItemView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.SubmissionView;
+import static com.example.ratingsystem.persistence.PersistenceDtos.UpdateQuestionStandardsRequest;
 
 @Service
 public class ExamPersistenceService {
@@ -29,12 +33,15 @@ public class ExamPersistenceService {
     private final ExamJpaRepository examRepository;
     private final StudentJpaRepository studentRepository;
     private final ExamSubmissionJpaRepository submissionRepository;
+    private final GradingResultJpaRepository gradingResultRepository;
 
     public ExamPersistenceService(ExamJpaRepository examRepository, StudentJpaRepository studentRepository,
-                                  ExamSubmissionJpaRepository submissionRepository) {
+                                  ExamSubmissionJpaRepository submissionRepository,
+                                  GradingResultJpaRepository gradingResultRepository) {
         this.examRepository = examRepository;
         this.studentRepository = studentRepository;
         this.submissionRepository = submissionRepository;
+        this.gradingResultRepository = gradingResultRepository;
     }
 
     @Transactional
@@ -102,6 +109,46 @@ public class ExamPersistenceService {
                 .orElseThrow(() -> new PersistenceNotFoundException("考试不存在: " + examId));
     }
 
+    @Transactional(readOnly = true)
+    public List<ExamListItemView> listExams() {
+        return examRepository.findAllByOrderByIdDesc().stream().map(exam -> new ExamListItemView(
+                exam.getId(), exam.getName(), exam.getStatus(), exam.isStandardsReviewed(),
+                exam.getQuestions().size(), exam.getQuestions().stream()
+                .map(QuestionEntity::getMaxScore).reduce(BigDecimal.ZERO, BigDecimal::add)
+        )).toList();
+    }
+
+    @Transactional
+    public ExamView confirmStandards(Long examId) {
+        ExamEntity exam = examRepository.findByIdForUpdate(examId)
+                .orElseThrow(() -> new PersistenceNotFoundException("考试不存在: " + examId));
+        exam.confirmStandards(Instant.now());
+        examRepository.flush();
+        return getExam(examId);
+    }
+
+    @Transactional
+    public ExamView updateQuestionStandards(Long examId, Long questionId,
+                                            UpdateQuestionStandardsRequest request) {
+        ExamEntity exam = examRepository.findByIdForUpdate(examId)
+                .orElseThrow(() -> new PersistenceNotFoundException("考试不存在: " + examId));
+        if (exam.getStatus() == ExamStatus.SCORING || gradingResultRepository.countByExamId(examId) > 0) {
+            throw new PersistenceConflictException("该考试已经开始评分，不能再修改评分标准");
+        }
+        QuestionEntity question = exam.getQuestions().stream()
+                .filter(candidate -> candidate.getId().equals(questionId))
+                .findFirst()
+                .orElseThrow(() -> new PersistenceNotFoundException("题目不属于当前考试: " + questionId));
+        validateUpdatedStandards(question, request);
+
+        question.updateStandards(request.referenceAnswer().trim(), request.maxScore(),
+                trimToNull(request.gradingCriteria()));
+        synchronizeRubricItems(question, request.rubricItems());
+        exam.invalidateStandards();
+        examRepository.flush();
+        return getExam(examId);
+    }
+
     private void validateQuestions(CreateExamRequest request) {
         Set<Integer> questionNumbers = new HashSet<>();
         for (QuestionInput question : request.questions()) {
@@ -135,6 +182,44 @@ public class ExamPersistenceService {
         return input.fillBlankGradingMode() == null ? FillBlankGradingMode.EXACT : input.fillBlankGradingMode();
     }
 
+    private void validateUpdatedStandards(QuestionEntity question, UpdateQuestionStandardsRequest request) {
+        boolean aiQuestion = question.getQuestionType() == QuestionType.SHORT_ANSWER
+                || (question.getQuestionType() == QuestionType.FILL_BLANK
+                && question.getFillBlankGradingMode() == FillBlankGradingMode.AI);
+        if (aiQuestion && request.rubricItems().isEmpty()) {
+            throw new PersistenceValidationException("AI 评分题必须保留至少一个结构化评分点");
+        }
+        Set<Integer> itemOrders = new HashSet<>();
+        BigDecimal rubricMax = BigDecimal.ZERO;
+        for (PersistenceDtos.RubricItemInput item : request.rubricItems()) {
+            if (!itemOrders.add(item.itemOrder())) {
+                throw new PersistenceValidationException("同一道题的评分点顺序不能重复");
+            }
+            rubricMax = rubricMax.add(item.maxScore());
+        }
+        if (rubricMax.compareTo(request.maxScore()) > 0) {
+            throw new PersistenceValidationException("结构化评分点满分之和不能超过题目满分");
+        }
+    }
+
+    private void synchronizeRubricItems(QuestionEntity question,
+                                        List<PersistenceDtos.RubricItemInput> requestedItems) {
+        Map<Integer, QuestionRubricItemEntity> existingByOrder = question.getRubricItems().stream()
+                .collect(Collectors.toMap(QuestionRubricItemEntity::getItemOrder, Function.identity()));
+        Set<Integer> requestedOrders = requestedItems.stream()
+                .map(PersistenceDtos.RubricItemInput::itemOrder).collect(Collectors.toSet());
+        question.getRubricItems().removeIf(item -> !requestedOrders.contains(item.getItemOrder()));
+        for (PersistenceDtos.RubricItemInput requested : requestedItems) {
+            QuestionRubricItemEntity existing = existingByOrder.get(requested.itemOrder());
+            if (existing == null) {
+                question.addRubricItem(new QuestionRubricItemEntity(
+                        requested.itemOrder(), requested.name().trim(), requested.maxScore()));
+            } else {
+                existing.update(requested.name().trim(), requested.maxScore());
+            }
+        }
+    }
+
     private StudentEntity validateStudentName(StudentEntity student, String suppliedName) {
         if (!student.getName().equals(suppliedName.trim())) {
             throw new PersistenceConflictException("该学号已关联其他姓名，请核对考生信息");
@@ -143,10 +228,13 @@ public class ExamPersistenceService {
     }
 
     private ExamView toExamView(ExamEntity exam) {
-        return new ExamView(exam.getId(), exam.getName(), exam.getStatus(), exam.getQuestions().stream()
+        return new ExamView(exam.getId(), exam.getName(), exam.getStatus(), exam.isStandardsReviewed(),
+                exam.getStandardsReviewedAt(), exam.getQuestions().stream()
                 .sorted(java.util.Comparator.comparingInt(QuestionEntity::getQuestionNo))
                 .map(question -> new QuestionView(
-                        question.getId(), question.getQuestionNo(), question.getQuestionType(), question.getMaxScore(),
+                        question.getId(), question.getQuestionNo(), question.getQuestionType(), question.getContent(),
+                        question.getMaxScore(), question.getReferenceAnswer(), question.getGradingCriteria(),
+                        question.getFillBlankGradingMode(),
                         question.getRubricItems().stream().map(item -> new RubricItemView(
                                 item.getId(), item.getItemOrder(), item.getName(), item.getMaxScore()
                         )).toList()

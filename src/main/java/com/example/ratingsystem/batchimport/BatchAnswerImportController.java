@@ -41,6 +41,11 @@ public class BatchAnswerImportController {
         return service.getBatch(batchId);
     }
 
+    @GetMapping("/exams/{examId}/answer-import/batches/latest")
+    BatchImportView getLatestBatch(@PathVariable Long examId) {
+        return service.getLatestBatch(examId);
+    }
+
     @PutMapping("/answer-import/batches/{batchId}/students/{studentImportId}")
     BatchStudentView updateStudent(@PathVariable Long batchId,
                                    @PathVariable Long studentImportId,

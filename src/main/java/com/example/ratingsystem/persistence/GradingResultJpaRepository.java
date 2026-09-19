@@ -12,6 +12,9 @@ import java.util.Optional;
 
 interface GradingResultJpaRepository extends JpaRepository<GradingResultEntity, Long> {
 
+    @Query("select count(r) from GradingResultEntity r where r.studentAnswer.submission.exam.id = :examId")
+    long countByExamId(@Param("examId") Long examId);
+
     Optional<GradingResultEntity> findByStudentAnswerId(Long studentAnswerId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -30,6 +30,9 @@ class ExamEntity {
     @Enumerated(EnumType.STRING)
     private ExamStatus status = ExamStatus.DRAFT;
 
+    private boolean standardsReviewed;
+    private Instant standardsReviewedAt;
+
     @OneToMany(mappedBy = "exam", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("questionNo ASC")
     private Set<QuestionEntity> questions = new LinkedHashSet<>();
@@ -56,6 +59,16 @@ class ExamEntity {
         status = ExamStatus.SCORING;
     }
 
+    void confirmStandards(Instant confirmedAt) {
+        standardsReviewed = true;
+        standardsReviewedAt = confirmedAt;
+    }
+
+    void invalidateStandards() {
+        standardsReviewed = false;
+        standardsReviewedAt = null;
+    }
+
     Long getId() {
         return id;
     }
@@ -66,6 +79,14 @@ class ExamEntity {
 
     ExamStatus getStatus() {
         return status;
+    }
+
+    boolean isStandardsReviewed() {
+        return standardsReviewed;
+    }
+
+    Instant getStandardsReviewedAt() {
+        return standardsReviewedAt;
     }
 
     Set<QuestionEntity> getQuestions() {

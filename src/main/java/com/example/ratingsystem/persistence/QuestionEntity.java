@@ -79,6 +79,12 @@ class QuestionEntity {
         item.setQuestion(this);
     }
 
+    void updateStandards(String referenceAnswer, BigDecimal maxScore, String gradingCriteria) {
+        this.referenceAnswer = referenceAnswer;
+        this.maxScore = maxScore;
+        this.gradingCriteria = gradingCriteria;
+    }
+
     Long getId() {
         return id;
     }

@@ -16,11 +16,13 @@ import java.util.List;
 import static com.example.ratingsystem.persistence.PersistenceDtos.CreateExamRequest;
 import static com.example.ratingsystem.persistence.PersistenceDtos.CreateSubmissionRequest;
 import static com.example.ratingsystem.persistence.PersistenceDtos.ExamView;
+import static com.example.ratingsystem.persistence.PersistenceDtos.ExamListItemView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.GradeSubmissionView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.GradingResultView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.ReviewRequest;
 import static com.example.ratingsystem.persistence.PersistenceDtos.SubmissionScoreSummaryView;
 import static com.example.ratingsystem.persistence.PersistenceDtos.SubmissionView;
+import static com.example.ratingsystem.persistence.PersistenceDtos.UpdateQuestionStandardsRequest;
 
 @RestController
 @RequestMapping("/api")
@@ -41,6 +43,28 @@ public class PersistenceController {
     @ResponseStatus(HttpStatus.CREATED)
     ExamView createExam(@Valid @RequestBody CreateExamRequest request) {
         return examService.createExam(request);
+    }
+
+    @GetMapping("/exams")
+    List<ExamListItemView> listExams() {
+        return examService.listExams();
+    }
+
+    @GetMapping("/exams/{examId}")
+    ExamView getExam(@PathVariable Long examId) {
+        return examService.getExam(examId);
+    }
+
+    @PutMapping("/exams/{examId}/standards/confirm")
+    ExamView confirmStandards(@PathVariable Long examId) {
+        return examService.confirmStandards(examId);
+    }
+
+    @PutMapping("/exams/{examId}/questions/{questionId}/standards")
+    ExamView updateQuestionStandards(@PathVariable Long examId,
+                                     @PathVariable Long questionId,
+                                     @Valid @RequestBody UpdateQuestionStandardsRequest request) {
+        return examService.updateQuestionStandards(examId, questionId, request);
     }
 
     @PostMapping("/exams/{examId}/submissions")

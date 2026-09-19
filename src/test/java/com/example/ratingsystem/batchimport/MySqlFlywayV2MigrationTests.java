@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MySqlFlywayV2MigrationTests {
 
     @Test
-    void appliesV1AndV2OnRealMySql8AndCreatesSafeUniqueIndexes() throws Exception {
+    void appliesAllMigrationsOnRealMySql8AndCreatesSafeIndexes() throws Exception {
         String url = requiredEnvironment("RATING_MYSQL_MIGRATION_TEST_URL");
         String username = requiredEnvironment("RATING_MYSQL_MIGRATION_TEST_USERNAME");
         String password = requiredEnvironment("RATING_MYSQL_MIGRATION_TEST_PASSWORD");
@@ -50,6 +50,8 @@ class MySqlFlywayV2MigrationTests {
         try (Connection connection = DriverManager.getConnection(url, username, password)) {
             assertEquals(1, scalarInt(connection,
                     "select count(*) from flyway_schema_history where version = '2' and success = 1"));
+            assertEquals(1, scalarInt(connection,
+                    "select count(*) from flyway_schema_history where version = '3' and success = 1"));
             assertEquals(4, scalarInt(connection, """
                     select count(*) from information_schema.tables
                      where table_schema = database()
@@ -64,6 +66,13 @@ class MySqlFlywayV2MigrationTests {
                     """));
             assertEquals(List.of("batch_id", "source_path"), indexColumns(connection,
                     "answer_import_students", "uk_import_student_source"));
+            assertEquals(2, scalarInt(connection, """
+                    select count(*) from information_schema.tables
+                     where table_schema = database()
+                       and table_name in ('grading_tasks', 'grading_task_items')
+                    """));
+            assertEquals(List.of("task_id", "submission_id"), indexColumns(connection,
+                    "grading_task_items", "uk_grading_task_submission"));
         }
     }
 

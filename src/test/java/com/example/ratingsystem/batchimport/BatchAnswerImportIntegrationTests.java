@@ -66,6 +66,8 @@ class BatchAnswerImportIntegrationTests {
         JsonNode reloaded = performJson(get("/api/answer-import/batches/{id}", batch.get("id").longValue()));
         assertEquals(batch.get("students").get(1).get("answers").get(3).get("rawAnswer"),
                 reloaded.get("students").get(1).get("answers").get(3).get("rawAnswer"));
+        JsonNode latest = performJson(get("/api/exams/{id}/answer-import/batches/latest", exam.examId()));
+        assertEquals(batch.get("id").longValue(), latest.get("id").longValue());
     }
 
     @Test

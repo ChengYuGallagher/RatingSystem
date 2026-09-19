@@ -35,3 +35,16 @@ build/
 ### Local answer-import samples ###
 /test-files/docx/*.docx
 /test-files/batch/*.zip
+
+### Local secrets, database backups, logs and HTTP responses ###
+.env
+.env.*
+!.env.example
+http-client.private.env.json
+*.log
+*.bak
+*.dump
+*.sql.bak
+*.sql.gz
+*.http-response
+*.response

@@ -20,7 +20,7 @@ class FlywayV2MigrationTests {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void appliesV1AndV2AndValidatesJpaMappings() {
+    void appliesAllMigrationsAndValidatesJpaMappings() {
         Integer tableCount = jdbcTemplate.queryForObject("""
                 select count(*) from information_schema.tables
                  where table_name in ('answer_import_batches', 'answer_import_students',
@@ -33,5 +33,17 @@ class FlywayV2MigrationTests {
                  where table_name = 'answer_import_students' and column_name = 'source_path'
                 """, Integer.class);
         assertEquals(700, sourcePathLength);
+
+        Integer taskTableCount = jdbcTemplate.queryForObject("""
+                select count(*) from information_schema.tables
+                 where table_name in ('grading_tasks', 'grading_task_items')
+                """, Integer.class);
+        assertEquals(2, taskTableCount);
+
+        Integer reviewedColumnCount = jdbcTemplate.queryForObject("""
+                select count(*) from information_schema.columns
+                 where table_name = 'exams' and column_name = 'standards_reviewed'
+                """, Integer.class);
+        assertEquals(1, reviewedColumnCount);
     }
 }

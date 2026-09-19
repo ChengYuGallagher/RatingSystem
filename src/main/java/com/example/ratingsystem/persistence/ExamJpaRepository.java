@@ -8,8 +8,11 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
+import java.util.List;
 
 interface ExamJpaRepository extends JpaRepository<ExamEntity, Long> {
+
+    List<ExamEntity> findAllByOrderByIdDesc();
 
     @EntityGraph(attributePaths = {"questions", "questions.rubricItems"})
     @Query("select e from ExamEntity e where e.id = :id")

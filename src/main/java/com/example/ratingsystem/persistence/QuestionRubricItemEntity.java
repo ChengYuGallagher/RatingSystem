@@ -40,6 +40,11 @@ class QuestionRubricItemEntity {
         this.question = question;
     }
 
+    void update(String name, BigDecimal maxScore) {
+        this.name = name;
+        this.maxScore = maxScore;
+    }
+
     Long getId() {
         return id;
     }

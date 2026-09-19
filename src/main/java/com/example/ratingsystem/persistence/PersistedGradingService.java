@@ -88,8 +88,12 @@ public class PersistedGradingService {
             if (result.getVersion() != request.expectedVersion()) {
                 throw new PersistenceConflictException("评分结果已被其他审核操作修改，请重新查询后再提交");
             }
-            if (result.getGradingStatus() != GradingStatus.SUCCESS) {
-                throw new PersistenceConflictException("只有自动评分成功的结果才能进行人工审核");
+            if (result.getGradingStatus() == GradingStatus.RUNNING) {
+                throw new PersistenceConflictException("自动评分尚未结束，不能进行人工审核");
+            }
+            if (result.getGradingStatus() == GradingStatus.FAILED
+                    && request.action() != ReviewAction.SET_SCORE) {
+                throw new PersistenceConflictException("自动评分失败时必须由教师手动填写实际分数");
             }
 
             BigDecimal actualScore = resolveActualScore(result, request);

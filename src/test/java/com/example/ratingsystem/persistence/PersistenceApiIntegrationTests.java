@@ -212,28 +212,40 @@ class PersistenceApiIntegrationTests {
     }
 
     @Test
-    void rejectsReviewWhenAutomaticGradingHasFailedOrIsRunning() throws Exception {
+    void allowsManualFallbackForFailedGradingButStillRejectsRunningAndAcceptSuggestion() throws Exception {
         ExamIds exam = createExamWithChoiceAndShortAnswer();
         long submissionId = createSubmission(exam, "2026013");
         aiClient.returnInvalidJson();
         JsonNode failed = performJson(post("/api/submissions/{id}/grading", submissionId))
                 .get("results").get(1);
 
+        long resultId = failed.get("id").longValue();
         long version = failed.get("version").longValue();
-        assertReviewStatus(failed.get("id").longValue(), reviewBody("SET_SCORE", "3", version), 409);
+        assertReviewStatus(resultId, reviewBody("ACCEPT_SUGGESTION", null, version), 409);
 
         jdbcTemplate.update("""
                 update grading_results
                    set grading_status = 'RUNNING', running_since = CURRENT_TIMESTAMP
                  where id = ?
-                """, failed.get("id").longValue());
-        assertReviewStatus(failed.get("id").longValue(), reviewBody("SET_SCORE", "3", version), 409);
+                """, resultId);
+        assertReviewStatus(resultId, reviewBody("SET_SCORE", "3", version), 409);
+
+        jdbcTemplate.update("""
+                update grading_results
+                   set grading_status = 'FAILED', running_since = null
+                 where id = ?
+                """, resultId);
+        JsonNode reviewed = performJson(put("/api/grading/results/{id}/review", resultId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reviewBody("SET_SCORE", "3", version)));
+        assertScore("3", reviewed.get("actualScore"));
+        assertEquals("CONFIRMED", reviewed.get("reviewStatus").stringValue());
 
         JsonNode current = findResult(
                 performJson(get("/api/submissions/{id}/results", submissionId)),
-                failed.get("id").longValue());
-        assertTrue(current.get("actualScore").isNull());
-        assertEquals("PENDING", current.get("reviewStatus").stringValue());
+                resultId);
+        assertScore("3", current.get("actualScore"));
+        assertEquals("CONFIRMED", current.get("reviewStatus").stringValue());
     }
 
     @Test

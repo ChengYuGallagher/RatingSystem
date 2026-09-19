@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RatingSystem 教师工作台</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+    <div>
+        <p class="eyebrow">RatingSystem</p>
+        <h1>智能考试辅助评分系统</h1>
+    </div>
+    <div class="local-warning">仅限受控本机使用 · 正式对外部署前必须增加身份认证</div>
+</header>
+
+<main class="layout">
+    <aside class="sidebar panel">
+        <div class="section-title">
+            <div><span class="step">01</span><h2>试卷评分方案</h2></div>
+            <button id="refresh-exams" class="button ghost">刷新</button>
+        </div>
+        <div id="exam-list" class="exam-list"></div>
+        <button id="show-create-exam" class="button primary full">＋ 创建评分方案</button>
+    </aside>
+
+    <section class="workspace">
+        <div id="notice" class="notice hidden"></div>
+
+        <section id="empty-state" class="panel hero">
+            <p class="eyebrow">开始工作</p>
+            <h2>请选择左侧评分方案</h2>
+            <p>核对试题与评分标准后，依次完成答卷导入、建议评分和人工确认。</p>
+        </section>
+
+        <section id="create-exam-panel" class="panel hidden">
+            <div class="section-title">
+                <div><span class="step">新建</span><h2>创建试卷评分方案</h2></div>
+                <button id="cancel-create-exam" class="button ghost">取消</button>
+            </div>
+            <label class="field">考试名称<input id="exam-name" maxlength="200" placeholder="例如：Java程序设计期末考试"></label>
+            <div id="question-editor" class="question-editor"></div>
+            <div class="actions">
+                <button id="add-question" class="button secondary">＋ 添加试题</button>
+                <button id="create-exam" class="button primary">保存评分方案</button>
+            </div>
+        </section>
+
+        <div id="exam-workspace" class="hidden">
+            <nav class="tabs panel">
+                <button class="tab active" data-tab="standards">评分标准</button>
+                <button class="tab" data-tab="import">答卷导入</button>
+                <button class="tab" data-tab="grading">批量评分</button>
+                <button class="tab" data-tab="results">审核与成绩</button>
+            </nav>
+
+            <section id="tab-standards" class="tab-panel panel">
+                <div class="section-title">
+                    <div><span class="step">02</span><h2 id="exam-title">评分标准</h2></div>
+                    <span id="standards-status" class="badge"></span>
+                </div>
+                <div id="exam-summary" class="metric-row"></div>
+                <div id="question-list"></div>
+                <div class="confirm-box">
+                    <div>
+                        <strong>教师核对确认</strong>
+                        <p>请确认题干、标准答案、满分和评分细则准确无误。确认后才允许启动批量评分。</p>
+                    </div>
+                    <button id="confirm-standards" class="button success">确认评分标准</button>
+                </div>
+            </section>
+
+            <section id="tab-import" class="tab-panel panel hidden">
+                <div class="section-title"><div><span class="step">03</span><h2>上传并核对全班答卷</h2></div></div>
+                <div class="upload-box">
+                    <input id="zip-file" type="file" accept=".zip,application/zip">
+                    <button id="upload-zip" class="button primary">上传 ZIP 并解析</button>
+                    <span>仅处理 ZIP 内的 DOCX；不会自动评分。</span>
+                </div>
+                <div id="batch-summary"></div>
+                <div id="batch-students"></div>
+                <div class="actions">
+                    <button id="import-confirmed" class="button success hidden">正式导入已确认答卷</button>
+                </div>
+            </section>
+
+            <section id="tab-grading" class="tab-panel panel hidden">
+                <div class="section-title"><div><span class="step">04</span><h2>批量生成建议评分</h2></div></div>
+                <div class="callout">
+                    <strong>评分说明</strong>
+                    <p>选择、判断和精确填空题按规则评分；简答题可能调用配置的 DeepSeek；编程题不运行代码，当前进入教师人工评分。任务“成功”表示该答卷已处理，逐题 FAILED 仍需重试或由教师人工给分。</p>
+                </div>
+                <div class="actions">
+                    <button id="start-grading" class="button primary">启动批量建议评分</button>
+                    <button id="retry-grading" class="button secondary hidden">重试失败答卷</button>
+                </div>
+                <div id="task-view"></div>
+            </section>
+
+            <section id="tab-results" class="tab-panel panel hidden">
+                <div class="section-title">
+                    <div><span class="step">05</span><h2>人工审核与全班成绩</h2></div>
+                    <button id="refresh-results" class="button ghost">刷新成绩</button>
+                </div>
+                <div id="class-results" class="table-scroll"></div>
+                <div id="review-drawer" class="review-drawer hidden">
+                    <div class="section-title">
+                        <h2 id="review-title">逐题审核</h2>
+                        <button id="close-review" class="button ghost">关闭</button>
+                    </div>
+                    <div id="review-summary"></div>
+                    <div id="review-results"></div>
+                </div>
+            </section>
+        </div>
+    </section>
+</main>
+
+<template id="question-template">
+    <article class="question-edit-card">
+        <div class="question-edit-head"><strong class="question-index"></strong><button class="remove-question button danger ghost">删除</button></div>
+        <div class="form-grid">
+            <label class="field">题型<select class="q-type">
+                <option value="CHOICE">选择题</option><option value="FILL_BLANK">填空题</option>
+                <option value="TRUE_FALSE">判断题</option><option value="SHORT_ANSWER">简答题</option>
+                <option value="PROGRAMMING">编程题</option>
+            </select></label>
+            <label class="field">满分<input class="q-max" type="number" min="0.01" step="0.01" value="2"></label>
+            <label class="field fill-mode-wrap hidden">填空评分方式<select class="q-fill-mode"><option value="EXACT">精确比对</option><option value="AI">AI 辅助</option></select></label>
+        </div>
+        <label class="field">题干<textarea class="q-content" rows="2"></textarea></label>
+        <label class="field">标准答案<textarea class="q-reference" rows="2"></textarea></label>
+        <label class="field">评分细则<textarea class="q-criteria" rows="2" placeholder="客观题可留空"></textarea></label>
+        <label class="field">结构化评分点<textarea class="q-rubrics" rows="3" placeholder="每行：评分点名称|分值，例如：说明核心机制|5"></textarea></label>
+    </article>
+</template>
+
+<script src="/app.js"></script>
+</body>
+</html>
