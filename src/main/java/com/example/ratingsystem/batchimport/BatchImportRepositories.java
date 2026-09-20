@@ -12,6 +12,8 @@ import java.util.Optional;
 
 interface BatchImportJpaRepository extends JpaRepository<BatchImportEntity, Long> {
 
+    boolean existsByExamId(Long examId);
+
     Optional<BatchImportEntity> findFirstByExamIdOrderByIdDesc(Long examId);
 
     @Query("select distinct b from BatchImportEntity b where b.id = :id")

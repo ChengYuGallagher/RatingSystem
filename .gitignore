@@ -33,8 +33,7 @@ build/
 .vscode/
 
 ### Local answer-import samples ###
-/test-files/docx/*.docx
-/test-files/batch/*.zip
+/test-files/
 
 ### Local secrets, database backups, logs and HTTP responses ###
 .env
@@ -48,3 +47,6 @@ http-client.private.env.json
 *.sql.gz
 *.http-response
 *.response
+ai-settings.properties
+ai-settings.key
+/.rating-system/

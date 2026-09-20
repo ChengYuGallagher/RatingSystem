@@ -8,6 +8,8 @@ import java.util.List;
 
 interface ExamSubmissionJpaRepository extends JpaRepository<ExamSubmissionEntity, Long> {
 
+    boolean existsByExamId(Long examId);
+
     boolean existsByExamIdAndStudentId(Long examId, Long studentId);
 
     @EntityGraph(attributePaths = {"exam", "student"})

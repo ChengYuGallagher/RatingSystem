@@ -1,6 +1,10 @@
 package com.example.ratingsystem.grading.web;
 
 import com.example.ratingsystem.answerimport.AnswerImportException;
+import com.example.ratingsystem.examimport.ExamPaperAiException;
+import com.example.ratingsystem.examimport.ExamPaperImportException;
+import com.example.ratingsystem.grading.ai.AiConnectionException;
+import com.example.ratingsystem.grading.ai.AiSettingsException;
 import com.example.ratingsystem.grading.service.InvalidGradingRequestException;
 import com.example.ratingsystem.persistence.PersistenceConflictException;
 import com.example.ratingsystem.persistence.PersistenceNotFoundException;
@@ -14,6 +18,36 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GradingExceptionHandler {
+
+    @ExceptionHandler(ExamPaperImportException.class)
+    ProblemDetail handleExamPaperImport(ExamPaperImportException exception) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY,
+                exception.getMessage());
+        problem.setTitle("试卷草稿解析失败");
+        return problem;
+    }
+
+    @ExceptionHandler(ExamPaperAiException.class)
+    ProblemDetail handleExamPaperAi(ExamPaperAiException exception) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY,
+                exception.getMessage());
+        problem.setTitle("AI 试卷解析失败");
+        return problem;
+    }
+
+    @ExceptionHandler(AiSettingsException.class)
+    ProblemDetail handleAiSettings(AiSettingsException exception) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, exception.getMessage());
+        problem.setTitle("AI 配置无法保存");
+        return problem;
+    }
+
+    @ExceptionHandler(AiConnectionException.class)
+    ProblemDetail handleAiConnection(AiConnectionException exception) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, exception.getMessage());
+        problem.setTitle("AI 连接测试失败");
+        return problem;
+    }
 
     @ExceptionHandler(AnswerImportException.class)
     ProblemDetail handleAnswerImport(AnswerImportException exception) {

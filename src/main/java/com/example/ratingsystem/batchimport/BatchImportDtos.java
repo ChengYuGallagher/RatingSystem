@@ -13,6 +13,8 @@ import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
+import com.example.ratingsystem.persistence.GradingTaskDtos.GradingTaskView;
+
 public final class BatchImportDtos {
 
     private BatchImportDtos() {
@@ -100,5 +102,15 @@ public final class BatchImportDtos {
 
     public record ImportedSubmissionView(Long studentImportId, Long submissionId,
                                          String studentNo, String studentName) {
+    }
+
+    public record ConfirmImportAndGradeView(
+            Long batchId,
+            Long examId,
+            int automaticallyConfirmedCount,
+            BatchImportExecutionView importResult,
+            GradingTaskView gradingTask,
+            String stage
+    ) {
     }
 }

@@ -9,7 +9,6 @@ import org.springframework.web.client.RestClient;
 
 import java.net.URI;
 import java.net.SocketTimeoutException;
-import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -32,12 +31,10 @@ class DeepSeekAiClientTests {
         server = MockRestServiceServer.bindTo(builder).build();
         client = new DeepSeekAiClient(
                 builder.build(),
-                new AiProperties(
+                () -> new AiRuntimeConfig(
                         "test-key",
                         URI.create("https://api.deepseek.com"),
                         "deepseek-flash",
-                        Duration.ofSeconds(5),
-                        Duration.ofSeconds(60),
                         1200
                 )
         );
@@ -135,12 +132,10 @@ class DeepSeekAiClientTests {
         MockRestServiceServer noRequestServer = MockRestServiceServer.bindTo(builder).build();
         DeepSeekAiClient clientWithoutKey = new DeepSeekAiClient(
                 builder.build(),
-                new AiProperties(
+                () -> new AiRuntimeConfig(
                         " ",
                         URI.create("https://api.deepseek.com"),
                         "deepseek-flash",
-                        Duration.ofSeconds(5),
-                        Duration.ofSeconds(60),
                         1200
                 )
         );

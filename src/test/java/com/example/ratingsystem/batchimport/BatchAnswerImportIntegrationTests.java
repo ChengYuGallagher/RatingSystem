@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -274,6 +275,61 @@ class BatchAnswerImportIntegrationTests {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void confirmsImportsAndStartsGradingInOneIdempotentOperation() throws Exception {
+        ExamFixture exam = createChoiceOnlyExam();
+        performJson(put("/api/exams/{id}/standards/confirm", exam.examId()));
+        JsonNode batch = upload(exam.examId(), zip(Map.of(
+                "班级/20001_甲/20001_甲.docx", docx("1. A"),
+                "班级/20002_乙/20002_乙.docx", docx("1. B"))));
+
+        JsonNode first = performJson(post(
+                "/api/answer-import/batches/{id}/confirm-import-and-grade", batch.get("id").longValue()));
+        assertEquals(2, first.get("automaticallyConfirmedCount").intValue());
+        assertEquals(2, first.get("importResult").get("importedCount").intValue());
+        long taskId = first.get("gradingTask").get("id").longValue();
+        assertEquals(2, jdbcTemplate.queryForObject("select count(*) from exam_submissions", Integer.class));
+
+        JsonNode repeated = performJson(post(
+                "/api/answer-import/batches/{id}/confirm-import-and-grade", batch.get("id").longValue()));
+        assertEquals(0, repeated.get("automaticallyConfirmedCount").intValue());
+        assertEquals(0, repeated.get("importResult").get("importedCount").intValue());
+        assertEquals(taskId, repeated.get("gradingTask").get("id").longValue());
+        assertEquals(2, jdbcTemplate.queryForObject("select count(*) from exam_submissions", Integer.class));
+        assertEquals(1, jdbcTemplate.queryForObject("select count(*) from grading_tasks", Integer.class));
+    }
+
+    @Test
+    void oneClickWorkflowBlocksUnresolvedAnswersAndUnreviewedStandardsWithoutSideEffects() throws Exception {
+        ExamFixture exam = createChoiceOnlyExam();
+        JsonNode normalBatch = upload(exam.examId(), zip(Map.of(
+                "班级/20003_丙/20003_丙.docx", docx("1. A"))));
+        mockMvc.perform(post("/api/answer-import/batches/{id}/confirm-import-and-grade",
+                        normalBatch.get("id").longValue()))
+                .andExpect(status().isConflict());
+        assertEquals(0, jdbcTemplate.queryForObject("select count(*) from exam_submissions", Integer.class));
+
+        performJson(put("/api/exams/{id}/standards/confirm", exam.examId()));
+        JsonNode brokenBatch = upload(exam.examId(), zip(Map.of(
+                "班级/20004_丁/20004_丁.docx", docx("没有题号"))));
+        mockMvc.perform(post("/api/answer-import/batches/{id}/confirm-import-and-grade",
+                        brokenBatch.get("id").longValue()))
+                .andExpect(status().isConflict());
+        assertEquals(0, jdbcTemplate.queryForObject("select count(*) from exam_submissions", Integer.class));
+        assertEquals(0, jdbcTemplate.queryForObject("select count(*) from grading_tasks", Integer.class));
+    }
+
+    @Test
+    void examWithAnswerImportHistoryCannotBeDeleted() throws Exception {
+        ExamFixture exam = createChoiceOnlyExam();
+        upload(exam.examId(), zip(Map.of(
+                "班级/20005_戊/20005_戊.docx", docx("1. A"))));
+
+        mockMvc.perform(delete("/api/exams/{id}", exam.examId()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("该试卷已有答卷导入记录，不能直接删除"));
+    }
+
     private ExamFixture createExam() throws Exception {
         JsonNode exam = performJson(post("/api/exams").contentType(MediaType.APPLICATION_JSON).content("""
                 {"name":"批量导入测试","questions":[
@@ -297,6 +353,17 @@ class BatchAnswerImportIntegrationTests {
             ids[index] = exam.get("questions").get(index).get("id").longValue();
         }
         return new ExamFixture(exam.get("id").longValue(), ids);
+    }
+
+    private ExamFixture createChoiceOnlyExam() throws Exception {
+        JsonNode exam = performJson(post("/api/exams").contentType(MediaType.APPLICATION_JSON).content("""
+                {"name":"一键评分测试","questions":[
+                  {"questionNo":1,"questionType":"CHOICE","content":"请选择 A","maxScore":2,
+                   "referenceAnswer":"A","rubricItems":[]}
+                ]}
+                """));
+        return new ExamFixture(exam.get("id").longValue(),
+                new long[]{exam.get("questions").get(0).get("id").longValue()});
     }
 
     private JsonNode upload(long examId, byte[] zip) throws Exception {

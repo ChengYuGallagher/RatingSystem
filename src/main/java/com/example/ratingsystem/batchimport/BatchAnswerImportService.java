@@ -117,7 +117,7 @@ public class BatchAnswerImportService {
     public BatchStudentView updateStudent(Long batchId, Long studentImportId,
                                           UpdateBatchStudentRequest request) {
         BatchImportStudentEntity student = findStudentForUpdate(batchId, studentImportId);
-        requirePendingAndVersion(student, request.expectedVersion());
+        requireEditableAndVersion(student, request.expectedVersion());
         ExamView exam = examService.getExam(student.getBatch().getExamId());
         Map<Long, QuestionView> questions = questionsById(exam);
         Map<Long, BatchImportAnswerEntity> storedAnswers = student.getAnswers().stream()
@@ -144,8 +144,38 @@ public class BatchAnswerImportService {
             throw new PersistenceValidationException("修正后的题目映射必须与考试题目集合完全一致");
         }
         student.correctIdentity(request.studentNo().trim(), request.studentName().trim());
+        student.markCorrected();
         studentRepository.flush();
         return toStudentView(student, student.getBatch().getIssues());
+    }
+
+    @Transactional
+    public int confirmAllReady(Long batchId) {
+        BatchImportEntity batch = findBatch(batchId);
+        List<Long> pendingIds = batch.getStudents().stream()
+                .filter(student -> student.getReviewStatus() == BatchReviewStatus.PENDING)
+                .map(BatchImportStudentEntity::getId).toList();
+        long unresolved = batch.getStudents().stream()
+                .filter(student -> student.getReviewStatus() == BatchReviewStatus.PENDING)
+                .filter(student -> student.getParseStatus() != ParseStatus.SUCCESS)
+                .count();
+        if (unresolved > 0) {
+            throw new PersistenceConflictException("仍有 " + unresolved + " 份异常答卷需要修正，不能开始评分");
+        }
+        int confirmed = 0;
+        for (Long studentId : pendingIds) {
+            BatchImportStudentEntity student = findStudentForUpdate(batchId, studentId);
+            validateReadyForConfirmation(student);
+            if (studentRepository.existsByBatchIdAndStudentNoAndReviewStatusInAndIdNot(
+                    batchId, student.getStudentNo(),
+                    List.of(BatchReviewStatus.CONFIRMED, BatchReviewStatus.IMPORTED), student.getId())) {
+                throw new PersistenceConflictException("同一批次存在重复学号，不能开始评分: " + student.getStudentNo());
+            }
+            student.confirm();
+            confirmed++;
+        }
+        studentRepository.flush();
+        return confirmed;
     }
 
     @Transactional
@@ -324,6 +354,15 @@ public class BatchAnswerImportService {
         }
         if (student.getReviewStatus() != BatchReviewStatus.PENDING) {
             throw new PersistenceConflictException("已确认或已导入的解析结果不能继续修改");
+        }
+    }
+
+    private void requireEditableAndVersion(BatchImportStudentEntity student, long expectedVersion) {
+        if (student.getVersion() != expectedVersion) {
+            throw new PersistenceConflictException("解析审核记录已被修改，请重新查询后再提交");
+        }
+        if (student.getReviewStatus() == BatchReviewStatus.IMPORTED) {
+            throw new PersistenceConflictException("已正式导入的答卷不能继续修改");
         }
     }
 

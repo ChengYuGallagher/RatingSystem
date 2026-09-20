@@ -91,6 +91,14 @@ class BatchImportStudentEntity {
         this.studentName = studentName;
     }
 
+    void markCorrected() {
+        this.recognizedQuestionCount = expectedQuestionCount;
+        this.parseStatus = ParseStatus.SUCCESS;
+        if (reviewStatus == BatchReviewStatus.CONFIRMED) {
+            reviewStatus = BatchReviewStatus.PENDING;
+        }
+    }
+
     void confirm() {
         reviewStatus = BatchReviewStatus.CONFIRMED;
     }

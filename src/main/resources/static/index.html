@@ -1,141 +1,55 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RatingSystem 教师工作台</title>
-    <link rel="stylesheet" href="/app.css">
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RatingSystem 智能考试辅助评分系统</title><link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <header class="topbar">
-    <div>
-        <p class="eyebrow">RatingSystem</p>
-        <h1>智能考试辅助评分系统</h1>
-    </div>
-    <div class="local-warning">仅限受控本机使用 · 正式对外部署前必须增加身份认证</div>
+    <button id="home-button" class="brand-button" aria-label="返回首页"><span class="brand-mark">R</span><span>智能考试辅助评分系统</span></button>
+    <div class="top-actions"><button id="workspace-library" class="text-button hidden">返回试卷库</button><button id="workspace-home" class="text-button hidden">返回首页</button><button id="show-settings" class="icon-button" title="系统设置" aria-label="系统设置">⚙</button></div>
 </header>
-
-<main class="layout">
-    <aside class="sidebar panel">
-        <div class="section-title">
-            <div><span class="step">01</span><h2>试卷评分方案</h2></div>
-            <button id="refresh-exams" class="button ghost">刷新</button>
-        </div>
-        <div id="exam-list" class="exam-list"></div>
-        <button id="show-create-exam" class="button primary full">＋ 创建评分方案</button>
-    </aside>
-
-    <section class="workspace">
-        <div id="notice" class="notice hidden"></div>
-
-        <section id="empty-state" class="panel hero">
-            <p class="eyebrow">开始工作</p>
-            <h2>请选择左侧评分方案</h2>
-            <p>核对试题与评分标准后，依次完成答卷导入、建议评分和人工确认。</p>
-        </section>
-
-        <section id="create-exam-panel" class="panel hidden">
-            <div class="section-title">
-                <div><span class="step">新建</span><h2>创建试卷评分方案</h2></div>
-                <button id="cancel-create-exam" class="button ghost">取消</button>
-            </div>
-            <label class="field">考试名称<input id="exam-name" maxlength="200" placeholder="例如：Java程序设计期末考试"></label>
-            <div id="question-editor" class="question-editor"></div>
-            <div class="actions">
-                <button id="add-question" class="button secondary">＋ 添加试题</button>
-                <button id="create-exam" class="button primary">保存评分方案</button>
-            </div>
-        </section>
-
-        <div id="exam-workspace" class="hidden">
-            <nav class="tabs panel">
-                <button class="tab active" data-tab="standards">评分标准</button>
-                <button class="tab" data-tab="import">答卷导入</button>
-                <button class="tab" data-tab="grading">批量评分</button>
-                <button class="tab" data-tab="results">审核与成绩</button>
-            </nav>
-
-            <section id="tab-standards" class="tab-panel panel">
-                <div class="section-title">
-                    <div><span class="step">02</span><h2 id="exam-title">评分标准</h2></div>
-                    <span id="standards-status" class="badge"></span>
-                </div>
-                <div id="exam-summary" class="metric-row"></div>
-                <div id="question-list"></div>
-                <div class="confirm-box">
-                    <div>
-                        <strong>教师核对确认</strong>
-                        <p>请确认题干、标准答案、满分和评分细则准确无误。确认后才允许启动批量评分。</p>
-                    </div>
-                    <button id="confirm-standards" class="button success">确认评分标准</button>
-                </div>
-            </section>
-
-            <section id="tab-import" class="tab-panel panel hidden">
-                <div class="section-title"><div><span class="step">03</span><h2>上传并核对全班答卷</h2></div></div>
-                <div class="upload-box">
-                    <input id="zip-file" type="file" accept=".zip,application/zip">
-                    <button id="upload-zip" class="button primary">上传 ZIP 并解析</button>
-                    <span>仅处理 ZIP 内的 DOCX；不会自动评分。</span>
-                </div>
-                <div id="batch-summary"></div>
-                <div id="batch-students"></div>
-                <div class="actions">
-                    <button id="import-confirmed" class="button success hidden">正式导入已确认答卷</button>
-                </div>
-            </section>
-
-            <section id="tab-grading" class="tab-panel panel hidden">
-                <div class="section-title"><div><span class="step">04</span><h2>批量生成建议评分</h2></div></div>
-                <div class="callout">
-                    <strong>评分说明</strong>
-                    <p>选择、判断和精确填空题按规则评分；简答题可能调用配置的 DeepSeek；编程题不运行代码，当前进入教师人工评分。任务“成功”表示该答卷已处理，逐题 FAILED 仍需重试或由教师人工给分。</p>
-                </div>
-                <div class="actions">
-                    <button id="start-grading" class="button primary">启动批量建议评分</button>
-                    <button id="retry-grading" class="button secondary hidden">重试失败答卷</button>
-                </div>
-                <div id="task-view"></div>
-            </section>
-
-            <section id="tab-results" class="tab-panel panel hidden">
-                <div class="section-title">
-                    <div><span class="step">05</span><h2>人工审核与全班成绩</h2></div>
-                    <button id="refresh-results" class="button ghost">刷新成绩</button>
-                </div>
-                <div id="class-results" class="table-scroll"></div>
-                <div id="review-drawer" class="review-drawer hidden">
-                    <div class="section-title">
-                        <h2 id="review-title">逐题审核</h2>
-                        <button id="close-review" class="button ghost">关闭</button>
-                    </div>
-                    <div id="review-summary"></div>
-                    <div id="review-results"></div>
-                </div>
-            </section>
+<main class="page-shell">
+    <div id="notice" class="notice hidden" role="status"></div>
+    <section id="home-view" class="view home-view">
+        <div class="hero-copy"><p class="eyebrow">教师工作台</p><h1>开始阅卷</h1><p>创建一份新试卷，或从试卷库继续批改工作。</p></div>
+        <div class="entry-grid">
+            <button id="show-create-methods" class="entry-card primary-entry"><span class="entry-icon">＋</span><span><strong>创建新试卷</strong><small>AI 解析 Word 试卷，或手动录入。</small></span><span>进入</span></button>
+            <button id="show-exam-library" class="entry-card"><span class="entry-icon">▱</span><span><strong>打开试卷库</strong><small>查找试卷，继续上传答卷、评分或审核成绩。</small></span><span>打开</span></button>
         </div>
     </section>
+    <section id="create-methods-view" class="view hidden">
+        <div class="back-row"><button id="create-methods-back" class="text-button">← 返回首页</button></div>
+        <div class="hero-copy compact"><p class="eyebrow">新建</p><h1>创建新试卷</h1><p>选择更适合当前试卷的录入方式。</p></div>
+        <div class="entry-grid"><button id="show-ai-import" class="entry-card primary-entry"><span class="entry-icon">✦</span><span><strong>AI 导入试卷</strong><small>上传文字型 DOCX，生成可编辑草稿。</small></span><span>推荐</span></button><button id="show-manual-create" class="entry-card"><span class="entry-icon">✎</span><span><strong>手动创建</strong><small>逐题录入题目与评分标准。</small></span><span>进入</span></button></div>
+    </section>
+    <section id="ai-import-view" class="view hidden">
+        <div class="back-row"><button class="text-button" data-go-create>← 返回创建方式</button></div>
+        <div class="section-heading"><div><p class="eyebrow">AI 导入试卷</p><h1>从 Word 生成试卷草稿</h1><p>原题文字会优先保留；AI 推导与不确定内容必须由教师核对。</p></div></div>
+        <div class="content-panel upload-box vertical"><label class="field">考试试卷 DOCX（必选）<input id="exam-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label class="field">参考答案或评分标准 DOCX（可选）<input id="reference-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><div class="actions"><button id="preview-exam-docx" class="button primary">解析并生成草稿</button><button class="button secondary" data-open-ai-settings>检查 AI 配置</button></div><p class="helper">仅支持文字型 DOCX；扫描图片和 OCR 不在当前范围。此操作会调用已配置的 AI 服务。</p></div>
+        <div id="exam-import-result"></div>
+    </section>
+    <section id="manual-create-view" class="view hidden">
+        <div class="back-row"><button class="text-button" data-go-create>← 返回创建方式</button></div>
+        <div class="section-heading"><div><p class="eyebrow">试卷草稿</p><h1>核对并保存试卷</h1><p id="draft-guidance">保存后仍需确认整卷评分标准，才能开始阅卷。</p></div></div>
+        <form id="exam-form" class="content-panel"><label class="field">考试名称<input id="exam-name" maxlength="200" required placeholder="例如：Java 程序设计期末考试"></label><div id="draft-issues"></div><div id="question-editor" class="question-list"></div><div class="actions split"><button id="add-question" type="button" class="button secondary">＋ 添加题目</button><button class="button primary" type="submit">保存试卷</button></div></form>
+    </section>
+    <section id="exam-library-view" class="view hidden">
+        <div class="back-row"><button class="text-button" data-go-home>← 返回首页</button></div><div class="hero-copy compact"><p class="eyebrow">试卷管理</p><h1>试卷库</h1></div>
+        <section class="content-panel"><div class="section-heading library-heading"><div><h2>全部试卷</h2><p>在这里集中查找、打开和管理所有试卷。</p></div><button id="management-create" class="button primary">创建新试卷</button></div><div class="library-toolbar"><label class="library-search"><span aria-hidden="true">⌕</span><input id="exam-library-search" type="search" maxlength="200" placeholder="搜索试卷名称" autocomplete="off"></label><span id="exam-library-count" class="library-count"></span></div><div id="management-exam-list" class="exam-cards library-list"></div></section>
+    </section>
+    <section id="settings-panel" class="view hidden">
+        <div class="back-row"><button class="text-button" data-go-home>← 返回首页</button></div><div class="hero-copy compact"><p class="eyebrow">系统配置</p><h1>系统设置</h1></div>
+        <section id="management-ai" class="content-panel"><div class="section-heading"><div><h2>AI 配置</h2><p>网页配置优先于环境变量，新请求立即生效。</p></div><span id="ai-config-badge" class="badge"></span></div><div id="ai-config-summary" class="inline-status"></div><div class="form-grid"><label class="field wide">API Key<input id="ai-api-key" type="password" autocomplete="new-password" placeholder="留空表示保留已保存的密钥"></label><label class="field wide">API Base URL<input id="ai-base-url" maxlength="1000" placeholder="https://api.deepseek.com"></label><label class="field">模型名称<input id="ai-model" maxlength="200" placeholder="deepseek-chat"></label></div><p class="helper">配置加密保存在 Git 仓库之外；后端不会返回完整密钥。测试连接会产生少量 API 费用。</p><div class="actions end"><button id="test-ai-connection" class="button secondary">测试连接</button><button id="save-ai-settings" class="button primary">保存并启用</button></div></section>
+    </section>
+    <section id="workspace-view" class="view hidden">
+        <div class="workspace-heading"><div><p class="eyebrow">当前试卷</p><h1 id="exam-title">—</h1><div id="exam-summary" class="summary-line"></div></div></div>
+        <nav class="workspace-nav"><button class="active" data-workspace-tab="standards"><span>1</span>试卷设置</button><button data-workspace-tab="workflow"><span>2</span>导入与评分</button><button data-workspace-tab="results"><span>3</span>成绩与审核</button></nav>
+        <section id="workspace-standards" class="content-panel workspace-panel"><div class="section-heading"><div><h2>试卷设置</h2><p>逐题核对评分标准。修改后需重新确认整卷。</p></div><span id="standards-status" class="badge"></span></div><div id="question-list" class="question-list"></div><div class="confirm-box"><div><strong>完成整卷核对</strong><p>确认题干、标准答案、满分、细则和评分点准确。</p></div><button id="confirm-standards" class="button success">确认评分标准</button></div><div class="panel-footer"><button id="begin-grading" class="button primary">开始批改 →</button></div></section>
+        <section id="workspace-workflow" class="content-panel workspace-panel hidden"><div class="section-heading"><div><h2>导入与评分</h2><p>上传 ZIP 后只需处理异常答卷，再一键正式导入并评分。</p></div><span id="workflow-standard-badge" class="badge"></span></div><div class="upload-box"><div><strong>上传班级答卷 ZIP</strong><p>ZIP 内每名学生一个文件夹，文件夹中放置同名 DOCX。</p></div><input id="zip-file" type="file" accept=".zip,application/zip"><button id="upload-zip" class="button primary">上传并解析</button></div><div id="batch-summary"></div><div id="batch-students" class="student-import-list"></div><div id="workflow-action" class="confirm-box hidden"><div><strong>解析核对完成</strong><p>正常答卷会自动确认；异常答卷修正完成后，可一次完成导入并启动评分。</p></div><button id="confirm-import-grade" class="button success">确认并开始评分</button></div><div id="task-view"></div><div class="actions end"><button id="retry-grading" class="button secondary hidden">重试失败答卷</button><button id="view-results" class="button primary hidden">查看评分结果 →</button></div></section>
+        <section id="workspace-results" class="content-panel workspace-panel hidden"><div id="results-list-view"><div class="section-heading"><div><h2>成绩与审核</h2><p>建议分仅供参考，最终成绩只汇总教师确认的实际分。</p></div><button id="refresh-results" class="button secondary">刷新</button></div><div id="class-summary" class="summary-line"></div><div id="class-results" class="table-scroll"></div></div><div id="review-detail-view" class="hidden"><div class="section-heading"><div><p class="eyebrow">逐题审核</p><h2 id="review-title">—</h2></div><button id="back-to-students" class="button secondary">返回学生列表</button></div><div id="review-summary"></div><div id="review-results" class="review-results"></div><div class="panel-footer"><button id="review-next" class="button primary">审核下一名 →</button></div></div></section>
+    </section>
 </main>
-
-<template id="question-template">
-    <article class="question-edit-card">
-        <div class="question-edit-head"><strong class="question-index"></strong><button class="remove-question button danger ghost">删除</button></div>
-        <div class="form-grid">
-            <label class="field">题型<select class="q-type">
-                <option value="CHOICE">选择题</option><option value="FILL_BLANK">填空题</option>
-                <option value="TRUE_FALSE">判断题</option><option value="SHORT_ANSWER">简答题</option>
-                <option value="PROGRAMMING">编程题</option>
-            </select></label>
-            <label class="field">满分<input class="q-max" type="number" min="0.01" step="0.01" value="2"></label>
-            <label class="field fill-mode-wrap hidden">填空评分方式<select class="q-fill-mode"><option value="EXACT">精确比对</option><option value="AI">AI 辅助</option></select></label>
-        </div>
-        <label class="field">题干<textarea class="q-content" rows="2"></textarea></label>
-        <label class="field">标准答案<textarea class="q-reference" rows="2"></textarea></label>
-        <label class="field">评分细则<textarea class="q-criteria" rows="2" placeholder="客观题可留空"></textarea></label>
-        <label class="field">结构化评分点<textarea class="q-rubrics" rows="3" placeholder="每行：评分点名称|分值，例如：说明核心机制|5"></textarea></label>
-    </article>
-</template>
-
+<template id="question-template"><article class="question-edit-card"><div class="card-heading"><div><strong class="question-index"></strong><span class="draft-flag"></span></div><button type="button" class="remove-question button danger ghost">删除</button></div><div class="form-grid"><label class="field">题型<select class="q-type"><option value="CHOICE">选择题</option><option value="FILL_BLANK">填空题</option><option value="TRUE_FALSE">判断题</option><option value="SHORT_ANSWER">简答题</option><option value="PROGRAMMING">编程题</option></select></label><label class="field">满分<input class="q-max" type="number" min="0.01" step="0.01" value="2"></label><label class="field fill-mode-wrap hidden">填空评分方式<select class="q-fill-mode"><option value="EXACT">精确比对</option><option value="AI">AI 辅助</option></select></label></div><label class="field">题干<textarea class="q-content" rows="3"></textarea></label><label class="field">标准答案<textarea class="q-reference" rows="3"></textarea></label><label class="field">评分细则<textarea class="q-criteria" rows="2" placeholder="客观题可留空"></textarea></label><label class="field">结构化评分点<textarea class="q-rubrics" rows="3" placeholder="每行：评分点名称|分值"></textarea></label></article></template>
 <script src="/app.js"></script>
-</body>
-</html>
+</body></html>

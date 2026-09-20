@@ -4,6 +4,7 @@ import com.example.ratingsystem.batchimport.BatchImportDtos.BatchImportExecution
 import com.example.ratingsystem.batchimport.BatchImportDtos.BatchImportView;
 import com.example.ratingsystem.batchimport.BatchImportDtos.BatchStudentView;
 import com.example.ratingsystem.batchimport.BatchImportDtos.ConfirmBatchStudentRequest;
+import com.example.ratingsystem.batchimport.BatchImportDtos.ConfirmImportAndGradeView;
 import com.example.ratingsystem.batchimport.BatchImportDtos.UpdateBatchStudentRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -24,9 +25,12 @@ import org.springframework.web.multipart.MultipartFile;
 public class BatchAnswerImportController {
 
     private final BatchAnswerImportService service;
+    private final BatchImportGradingWorkflowService workflowService;
 
-    public BatchAnswerImportController(BatchAnswerImportService service) {
+    public BatchAnswerImportController(BatchAnswerImportService service,
+                                       BatchImportGradingWorkflowService workflowService) {
         this.service = service;
+        this.workflowService = workflowService;
     }
 
     @PostMapping(value = "/exams/{examId}/answer-import/batches/preview",
@@ -63,5 +67,11 @@ public class BatchAnswerImportController {
     @PostMapping("/answer-import/batches/{batchId}/import")
     BatchImportExecutionView importConfirmed(@PathVariable Long batchId) {
         return service.importConfirmed(batchId);
+    }
+
+    @PostMapping("/answer-import/batches/{batchId}/confirm-import-and-grade")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    ConfirmImportAndGradeView confirmImportAndGrade(@PathVariable Long batchId) {
+        return workflowService.confirmImportAndGrade(batchId);
     }
 }

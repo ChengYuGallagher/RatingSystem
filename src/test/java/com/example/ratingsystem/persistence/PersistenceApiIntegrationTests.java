@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -336,6 +337,23 @@ class PersistenceApiIntegrationTests {
         assertScore("3.50", afterRetry.get("actualScore"));
         assertEquals("CONFIRMED", afterRetry.get("reviewStatus").stringValue());
         assertEquals(1, aiClient.calls());
+    }
+
+    @Test
+    void deletesOnlyAnExamWithoutSubmissionsOrResults() throws Exception {
+        ExamIds emptyExam = createExamWithChoiceAndShortAnswer();
+        mockMvc.perform(delete("/api/exams/{id}", emptyExam.examId()))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/exams/{id}", emptyExam.examId()))
+                .andExpect(status().isNotFound());
+
+        ExamIds usedExam = createExamWithChoiceAndShortAnswer();
+        createSubmission(usedExam, "2026099");
+        mockMvc.perform(delete("/api/exams/{id}", usedExam.examId()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("该试卷已有答卷、评分任务或成绩，不能直接删除"));
+        mockMvc.perform(get("/api/exams/{id}", usedExam.examId()))
+                .andExpect(status().isOk());
     }
 
     private ExamIds createExamWithChoiceAndShortAnswer() throws Exception {

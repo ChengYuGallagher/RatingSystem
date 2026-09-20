@@ -1,392 +1,186 @@
-const state = { exams: [], exam: null, batch: null, task: null, classResults: null, pollTimer: null };
-
+const state = {exams: [], exam: null, batch: null, task: null, classResults: null, aiSettings: null, pollTimer: null, reviewIndex: -1, createOrigin: 'home'};
 const $ = id => document.getElementById(id);
-const typeName = type => ({CHOICE:'选择题', FILL_BLANK:'填空题', TRUE_FALSE:'判断题', SHORT_ANSWER:'简答题', PROGRAMMING:'编程题'})[type] || type;
+const typeName = type => ({CHOICE:'选择题',FILL_BLANK:'填空题',TRUE_FALSE:'判断题',SHORT_ANSWER:'简答题',PROGRAMMING:'编程题'})[type] || type;
+const parseStatusName = value => ({SUCCESS:'解析成功',NEEDS_REVIEW:'需要核对',FAILED:'解析失败'})[value] || value;
+const reviewStatusName = value => ({PENDING:'待确认',CONFIRMED:'已确认',IMPORTED:'已导入'})[value] || value;
+const taskStatusName = value => ({PENDING:'等待开始',RUNNING:'评分中',COMPLETED:'已完成',PARTIAL_FAILED:'部分失败',PARTIALLY_FAILED:'部分失败',FAILED:'失败',SUCCESS:'成功'})[value] || value;
 const money = value => value == null ? '—' : Number(value).toFixed(2);
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'})[ch]);
+const viewIds = ['home-view','create-methods-view','ai-import-view','manual-create-view','exam-library-view','settings-panel','workspace-view'];
+const pendingConfirmation = student => student.reviewStatus === 'PENDING';
 
 async function api(url, options = {}) {
     const response = await fetch(url, options);
     const contentType = response.headers.get('content-type') || '';
-    const body = contentType.includes('json') ? await response.json() : await response.text();
+    let body = '';
+    try { body = contentType.includes('json') ? await response.json() : await response.text(); } catch {}
     if (!response.ok) {
-        const error = new Error(body.detail || body.message || body || `请求失败：${response.status}`);
-        error.status = response.status;
-        throw error;
+        const detail = typeof body === 'object' ? (body.detail || body.message || body.title) : body;
+        const error = new Error(detail || `请求失败（HTTP ${response.status}）`); error.status = response.status; throw error;
     }
     return body;
 }
 
-function notify(message, kind = 'info') {
-    const notice = $('notice');
-    notice.textContent = message;
-    notice.className = `notice ${kind}`;
-    clearTimeout(notice._timer);
-    notice._timer = setTimeout(() => notice.classList.add('hidden'), 5000);
+function notify(message, kind='info') {
+    const node = $('notice'); node.textContent = message; node.className = `notice ${kind}`;
+    clearTimeout(node._timer); node._timer = setTimeout(() => node.classList.add('hidden'), 6500);
 }
-
-async function loadExams(selectId) {
+function showView(id) {
+    viewIds.forEach(view => $(view).classList.toggle('hidden', view !== id));
+    $('workspace-home').classList.toggle('hidden', id !== 'workspace-view'); window.scrollTo({top:0,behavior:'smooth'});
+    $('workspace-library').classList.toggle('hidden', id !== 'workspace-view');
+}
+function examStatus(exam) {
+    if (exam.status === 'SCORING') return '已开始批改';
+    return exam.standardsReviewed ? '可开始批改' : '评分标准待核对';
+}
+async function loadExams() {
+    state.exams = await api('/api/exams'); renderExamLists();
+}
+function examRow(exam, management=false) {
+    return `<article class="exam-row"><div class="exam-row-main" data-open-exam="${exam.id}" title="${escapeHtml(exam.name)}"><strong>${escapeHtml(exam.name)}</strong><div class="exam-row-meta"><span>${exam.questionCount} 题</span><span>满分 ${money(exam.maxScore)}</span><span class="badge ${exam.standardsReviewed?'success':'warning'}">${examStatus(exam)}</span></div></div><div class="exam-row-actions"><button class="button secondary" data-open-exam="${exam.id}">${management?'打开':'打开'}</button>${management?`<button class="button danger ghost" data-delete-exam="${exam.id}" data-exam-name="${escapeHtml(exam.name)}">删除</button>`:''}</div></article>`;
+}
+function renderExamLists() {
+    const empty = '<div class="empty">还没有试卷，请先创建。</div>';
+    const keyword = $('exam-library-search').value.trim().toLocaleLowerCase('zh-CN');
+    const visible = keyword ? state.exams.filter(exam => exam.name.toLocaleLowerCase('zh-CN').includes(keyword)) : state.exams;
+    $('management-exam-list').innerHTML = visible.length ? visible.map(exam => examRow(exam,true)).join('')
+        : (state.exams.length ? '<div class="empty">没有找到名称匹配的试卷。</div>' : empty);
+    $('exam-library-count').textContent = keyword ? `找到 ${visible.length} / 共 ${state.exams.length} 份` : `共 ${state.exams.length} 份`;
+    document.querySelectorAll('[data-open-exam]').forEach(node => node.onclick = () => openExam(Number(node.dataset.openExam)));
+    document.querySelectorAll('[data-delete-exam]').forEach(node => node.onclick = () => deleteExam(Number(node.dataset.deleteExam), node.dataset.examName));
+}
+async function openExam(id, tab='standards') {
     try {
-        state.exams = await api('/api/exams');
-        renderExamList();
-        if (selectId) await selectExam(selectId);
-    } catch (error) { notify(error.message, 'error'); }
+        state.exam = await api(`/api/exams/${id}`); state.batch = null; state.task = null; state.classResults = null;
+        showView('workspace-view'); renderExam(); showWorkspaceTab(tab);
+    } catch (error) { notify(error.message,'error'); }
+}
+async function deleteExam(id, name) {
+    if (!confirm(`确定删除“${name}”吗？仅没有答卷、导入记录和成绩的试卷可以删除。`)) return;
+    if (!confirm('此操作会删除试卷题目和评分标准，且不能撤销。继续删除吗？')) return;
+    try { await api(`/api/exams/${id}`,{method:'DELETE'}); await loadExams(); notify('空试卷已删除。','success'); }
+    catch (error) { notify(error.message,'error'); }
 }
 
-function renderExamList() {
-    $('exam-list').innerHTML = state.exams.length ? state.exams.map(exam => `
-        <button class="exam-item ${state.exam?.id === exam.id ? 'active' : ''}" data-exam-id="${exam.id}">
-            <strong>${escapeHtml(exam.name)}</strong>
-            <span>${exam.questionCount} 题 · ${money(exam.maxScore)} 分 · ${exam.standardsReviewed ? '标准已确认' : '待核对标准'}</span>
-        </button>`).join('') : '<p class="score-pending">暂无评分方案</p>';
-    document.querySelectorAll('[data-exam-id]').forEach(button => button.onclick = () => selectExam(Number(button.dataset.examId)));
+function showWorkspaceTab(tab) {
+    ['standards','workflow','results'].forEach(name => {
+        $(`workspace-${name}`).classList.toggle('hidden', name !== tab);
+        document.querySelector(`[data-workspace-tab="${name}"]`).classList.toggle('active', name === tab);
+    });
+    if (tab === 'workflow') loadWorkflowState();
+    if (tab === 'results') loadClassResults();
 }
-
-async function selectExam(id) {
-    try {
-        state.exam = await api(`/api/exams/${id}`);
-        state.batch = null; state.task = null; state.classResults = null;
-        $('empty-state').classList.add('hidden');
-        $('create-exam-panel').classList.add('hidden');
-        $('exam-workspace').classList.remove('hidden');
-        renderExamList(); renderExam(); showTab('standards');
-    } catch (error) { notify(error.message, 'error'); }
-}
-
 function renderExam() {
-    const exam = state.exam;
+    const exam = state.exam; const total = exam.questions.reduce((sum,q) => sum + Number(q.maxScore),0);
     $('exam-title').textContent = exam.name;
-    const total = exam.questions.reduce((sum, q) => sum + Number(q.maxScore), 0);
-    $('exam-summary').innerHTML = `<div class="metric"><span>题目数量</span><strong>${exam.questions.length}</strong></div>
-        <div class="metric"><span>试卷满分</span><strong>${money(total)}</strong></div>
-        <div class="metric"><span>当前状态</span><strong>${exam.status}</strong></div>`;
-    $('standards-status').textContent = exam.standardsReviewed ? '已由教师确认' : '等待教师核对';
-    $('standards-status').className = `badge ${exam.standardsReviewed ? 'success' : 'warning'}`;
+    $('exam-summary').innerHTML = `<span class="summary-chip">${exam.questions.length} 道题</span><span class="summary-chip">满分 ${money(total)}</span><span class="summary-chip">${examStatus(exam)}</span>`;
+    $('standards-status').textContent = exam.standardsReviewed ? '整卷已确认' : '等待教师核对';
+    $('standards-status').className = `badge ${exam.standardsReviewed?'success':'warning'}`;
+    $('workflow-standard-badge').textContent = exam.standardsReviewed ? '评分标准已确认' : '需先确认评分标准';
+    $('workflow-standard-badge').className = `badge ${exam.standardsReviewed?'success':'warning'}`;
     $('confirm-standards').disabled = exam.standardsReviewed;
-    $('confirm-standards').textContent = exam.standardsReviewed ? '评分标准已确认' : '确认评分标准';
-    $('start-grading').disabled = !exam.standardsReviewed;
-    $('question-list').innerHTML = exam.questions.map(q => `
-        <article class="question-card" data-standard-question-id="${q.id}">
-            <div class="question-head"><strong>第 ${q.questionNo} 题 · ${typeName(q.questionType)}</strong>
-                <div class="question-meta">${q.fillBlankGradingMode ? `<span>${q.fillBlankGradingMode}</span>` : ''}</div></div>
-            <div class="answer-box"><strong>题干</strong><br>${escapeHtml(q.content)}</div>
-            <div class="form-grid"><label class="field">满分<input class="standard-max" type="number" min="0.01" step="0.01" value="${q.maxScore}"></label></div>
-            <label class="field">标准答案<textarea class="standard-reference" rows="2">${escapeHtml(q.referenceAnswer)}</textarea></label>
-            <label class="field">评分细则<textarea class="standard-criteria" rows="2">${escapeHtml(q.gradingCriteria || '')}</textarea></label>
-            ${q.rubricItems.length ? `<label class="field">结构化评分点<textarea class="standard-rubrics" rows="${Math.max(3, q.rubricItems.length)}">${q.rubricItems.map(r => `${escapeHtml(r.name)}|${r.maxScore}`).join('\n')}</textarea><small>每行格式：评分点名称|分值；评分点总分不得超过题目满分。</small></label>` : ''}
-            <div class="actions"><button class="button secondary small save-standard">保存本题评分标准</button></div>
-        </article>`).join('');
+    $('confirm-standards').textContent = exam.standardsReviewed ? '评分标准已确认' : '确认整卷评分标准';
+    $('begin-grading').disabled = !exam.standardsReviewed;
+    $('question-list').innerHTML = exam.questions.map(question => standardCard(question)).join('');
     document.querySelectorAll('[data-standard-question-id]').forEach(card => {
-        card.querySelector('.save-standard').onclick = () => saveQuestionStandard(Number(card.dataset.standardQuestionId), card);
+        card.querySelector('.edit-standard').onclick = () => card.querySelector('.standard-editor').classList.toggle('hidden');
+        card.querySelector('.cancel-standard').onclick = () => card.querySelector('.standard-editor').classList.add('hidden');
+        card.querySelector('.save-standard').onclick = () => saveQuestionStandard(Number(card.dataset.standardQuestionId),card);
     });
 }
-
-async function saveQuestionStandard(questionId, card) {
-    const referenceAnswer = card.querySelector('.standard-reference').value.trim();
-    const maxScore = Number(card.querySelector('.standard-max').value);
-    if (!referenceAnswer || !Number.isFinite(maxScore) || maxScore <= 0) {
-        notify('标准答案不能为空，题目满分必须大于 0。', 'error');
-        return;
-    }
-    let rubricItems = [];
-    const rubricEditor = card.querySelector('.standard-rubrics');
-    if (rubricEditor) {
-        try {
-            rubricItems = rubricEditor.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map((line, index) => {
-                const split = line.lastIndexOf('|');
-                if (split < 1) throw new Error('评分点格式应为“名称|分值”');
-                const score = Number(line.slice(split + 1).trim());
-                if (!Number.isFinite(score) || score <= 0) throw new Error('评分点分值必须大于 0');
-                return {itemOrder:index + 1, name:line.slice(0, split).trim(), maxScore:score};
-            });
-        } catch (error) {
-            notify(error.message, 'error');
-            return;
-        }
-    }
+function standardCard(question) {
+    const rubrics = question.rubricItems || [];
+    return `<article class="standard-card" data-standard-question-id="${question.id}"><div class="card-heading"><div><strong>第 ${question.questionNo} 题 · ${typeName(question.questionType)}</strong>${question.fillBlankGradingMode?` <span class="badge info">${question.fillBlankGradingMode==='AI'?'AI 辅助':'精确比对'}</span>`:''}</div><div><span class="badge">${money(question.maxScore)} 分</span> <button class="button secondary edit-standard">编辑</button></div></div><div class="standard-read"><div class="standard-value"><strong>题目</strong>${escapeHtml(question.content)}</div><div class="standard-value"><strong>标准答案</strong>${escapeHtml(question.referenceAnswer)}</div>${question.gradingCriteria?`<div class="standard-value"><strong>评分细则</strong>${escapeHtml(question.gradingCriteria)}</div>`:''}${rubrics.length?`<div class="standard-value"><strong>结构化评分点</strong>${rubrics.map(r=>`${escapeHtml(r.name)}（${money(r.maxScore)} 分）`).join('；')}</div>`:''}</div><div class="standard-editor hidden"><div class="form-grid"><label class="field">题目满分<input class="standard-max" type="number" min="0.01" step="0.01" value="${question.maxScore}"></label></div><label class="field">标准答案<textarea class="standard-reference" rows="3">${escapeHtml(question.referenceAnswer)}</textarea></label><label class="field">评分细则<textarea class="standard-criteria" rows="3">${escapeHtml(question.gradingCriteria||'')}</textarea></label>${rubrics.length?`<label class="field">结构化评分点<textarea class="standard-rubrics" rows="${Math.max(3,rubrics.length)}">${rubrics.map(r=>`${escapeHtml(r.name)}|${r.maxScore}`).join('\n')}</textarea><small>每行：评分点名称|分值</small></label>`:''}<div class="actions end"><button class="button ghost cancel-standard">取消</button><button class="button primary save-standard">保存本题</button></div></div></article>`;
+}
+function parseRubrics(text,maxScore) {
+    const items = text.split(/\r?\n/).map(v=>v.trim()).filter(Boolean).map((line,index)=>{const split=line.lastIndexOf('|');if(split<1)throw new Error('评分点格式应为“名称|分值”');const name=line.slice(0,split).trim(),score=Number(line.slice(split+1));if(!name||!Number.isFinite(score)||score<=0)throw new Error('评分点名称不能为空，分值必须大于 0');return {itemOrder:index+1,name,maxScore:score};});
+    if(items.reduce((s,i)=>s+i.maxScore,0)>maxScore+0.000001)throw new Error('结构化评分点总分不得超过题目满分'); return items;
+}
+async function saveQuestionStandard(questionId,card) {
     try {
-        state.exam = await api(`/api/exams/${state.exam.id}/questions/${questionId}/standards`, {
-            method:'PUT', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({referenceAnswer, maxScore, gradingCriteria:card.querySelector('.standard-criteria').value.trim() || null, rubricItems})
-        });
-        renderExam();
-        state.exams = await api('/api/exams');
-        renderExamList();
-        notify('本题评分标准已保存，整份试卷需要重新确认后才能批量评分。', 'success');
-    } catch (error) { notify(error.message, 'error'); }
+        const referenceAnswer=card.querySelector('.standard-reference').value.trim(),maxScore=Number(card.querySelector('.standard-max').value);
+        if(!referenceAnswer||!Number.isFinite(maxScore)||maxScore<=0)throw new Error('标准答案不能为空，题目满分必须大于 0');
+        const editor=card.querySelector('.standard-rubrics'); const rubricItems=editor?parseRubrics(editor.value,maxScore):[];
+        state.exam=await api(`/api/exams/${state.exam.id}/questions/${questionId}/standards`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({referenceAnswer,maxScore,gradingCriteria:card.querySelector('.standard-criteria').value.trim()||null,rubricItems})});
+        renderExam(); await loadExams(); notify('本题已保存，整卷确认状态已撤销。','success');
+    } catch(error){notify(error.message,'error');}
 }
 
-function showCreateExam() {
-    $('empty-state').classList.add('hidden'); $('exam-workspace').classList.add('hidden');
-    $('create-exam-panel').classList.remove('hidden');
-    if (!$('question-editor').children.length) addQuestion();
+function resetEditor() { $('exam-name').value=''; $('question-editor').innerHTML=''; $('draft-issues').innerHTML=''; $('draft-guidance').textContent='保存后仍需确认整卷评分标准，才能开始阅卷。'; }
+function addQuestion(defaults={}) {
+    const fragment=$('question-template').content.cloneNode(true), card=fragment.querySelector('.question-edit-card');
+    card.querySelector('.q-type').value=defaults.questionType||'CHOICE'; card.querySelector('.q-max').value=defaults.maxScore||2; card.querySelector('.q-content').value=defaults.content||''; card.querySelector('.q-reference').value=defaults.referenceAnswer||''; card.querySelector('.q-criteria').value=defaults.gradingCriteria||''; card.querySelector('.q-fill-mode').value=defaults.fillBlankGradingMode||'EXACT'; card.querySelector('.q-rubrics').value=(defaults.rubricItems||[]).map(r=>`${r.name}|${r.maxScore}`).join('\n');
+    if(defaults.needsReview){card.querySelector('.draft-flag').textContent='待核对';card.title=(defaults.reviewNotes||[]).join('；');}
+    card.querySelector('.q-type').onchange=()=>updateQuestionEditor(card); card.querySelector('.remove-question').onclick=()=>{card.remove();renumberQuestions();}; $('question-editor').appendChild(fragment); updateQuestionEditor(card); renumberQuestions();
+}
+function updateQuestionEditor(card){card.querySelector('.fill-mode-wrap').classList.toggle('hidden',card.querySelector('.q-type').value!=='FILL_BLANK');}
+function renumberQuestions(){[...document.querySelectorAll('.question-edit-card')].forEach((card,index)=>card.querySelector('.question-index').textContent=`第 ${index+1} 题`);}
+function collectExamRequest(){
+    const name=$('exam-name').value.trim(),cards=[...document.querySelectorAll('.question-edit-card')]; if(!name||!cards.length)throw new Error('请填写考试名称并至少添加一道题');
+    return {name,questions:cards.map((card,index)=>{const questionType=card.querySelector('.q-type').value,content=card.querySelector('.q-content').value.trim(),referenceAnswer=card.querySelector('.q-reference').value.trim(),maxScore=Number(card.querySelector('.q-max').value);if(!content||!referenceAnswer||!Number.isFinite(maxScore)||maxScore<=0)throw new Error(`第 ${index+1} 题的题干、标准答案和有效满分均为必填项`);const rubricItems=parseRubrics(card.querySelector('.q-rubrics').value,maxScore);if((questionType==='SHORT_ANSWER'||(questionType==='FILL_BLANK'&&card.querySelector('.q-fill-mode').value==='AI'))&&!rubricItems.length)throw new Error(`第 ${index+1} 题使用 AI 评分，必须填写结构化评分点`);return {questionNo:index+1,questionType,content,maxScore,referenceAnswer,gradingCriteria:card.querySelector('.q-criteria').value.trim()||null,fillBlankGradingMode:questionType==='FILL_BLANK'?card.querySelector('.q-fill-mode').value:null,rubricItems};})};
+}
+async function createExam(event){event.preventDefault();try{const created=await api('/api/exams',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(collectExamRequest())});await loadExams();resetEditor();notify('试卷已保存，请继续核对评分标准。','success');await openExam(created.id);}catch(error){notify(error.message,'error');}}
+async function importExamDocx(){
+    const examFile=$('exam-docx-file').files[0]; if(!examFile){notify('请选择考试试卷 DOCX。','error');return;} const button=$('preview-exam-docx');button.disabled=true;button.textContent='AI 正在解析…';
+    try{const form=new FormData();form.append('examFile',examFile);const ref=$('reference-docx-file').files[0];if(ref)form.append('referenceFile',ref);const draft=await api('/api/exam-import/preview',{method:'POST',body:form});resetEditor();$('exam-name').value=draft.suggestedName||examFile.name.replace(/\.docx$/i,'');draft.questions.forEach(addQuestion);$('draft-guidance').textContent='这是 AI 生成的可编辑草稿。待核对标记不会自动确认，保存后还需整卷确认。';const issues=[...(draft.issues||[]),...draft.questions.flatMap(q=>(q.reviewNotes||[]).map(note=>`第 ${q.questionNo} 题：${note}`))];$('draft-issues').innerHTML=issues.length?`<div class="issues"><strong>需要教师核对</strong><ul>${issues.map(i=>`<li>${escapeHtml(i)}</li>`).join('')}</ul></div>`:'';$('exam-import-result').innerHTML=`<div class="inline-status">已提取 ${draft.questions.length} 道题，${draft.needsReview?'存在待核对内容':'仍请逐题复核'}。草稿尚未写入数据库。</div>`;showView('manual-create-view');notify('试卷草稿已生成，请逐题核对后保存。','success');}catch(error){$('exam-import-result').innerHTML=`<div class="issues"><strong>未创建试卷</strong><p>${escapeHtml(error.message)}</p></div>`;notify(error.message,'error');}finally{button.disabled=false;button.textContent='解析并生成草稿';}
 }
 
-function addQuestion(defaults = {}) {
-    const fragment = $('question-template').content.cloneNode(true);
-    const card = fragment.querySelector('.question-edit-card');
-    card.querySelector('.q-type').value = defaults.questionType || 'CHOICE';
-    card.querySelector('.q-max').value = defaults.maxScore || 2;
-    card.querySelector('.q-content').value = defaults.content || '';
-    card.querySelector('.q-reference').value = defaults.referenceAnswer || '';
-    card.querySelector('.q-criteria').value = defaults.gradingCriteria || '';
-    card.querySelector('.q-type').onchange = () => updateQuestionEditor(card);
-    card.querySelector('.remove-question').onclick = () => { card.remove(); renumberQuestions(); };
-    $('question-editor').appendChild(fragment); updateQuestionEditor(card); renumberQuestions();
+async function loadWorkflowState(){
+    if(!state.exam)return; try{state.batch=await api(`/api/exams/${state.exam.id}/answer-import/batches/latest`);renderBatch();}catch(error){if(error.status!==404)notify(error.message,'error');else{$('batch-summary').innerHTML='';$('batch-students').innerHTML='';$('workflow-action').classList.add('hidden');}}
+    try{state.task=await api(`/api/exams/${state.exam.id}/grading-tasks/latest`);renderTask();if(state.task.status==='RUNNING'||state.task.status==='PENDING')scheduleTaskPoll();}catch(error){if(error.status!==404)notify(error.message,'error');}
 }
-
-function updateQuestionEditor(card) {
-    card.querySelector('.fill-mode-wrap').classList.toggle('hidden', card.querySelector('.q-type').value !== 'FILL_BLANK');
+async function uploadZip(){const file=$('zip-file').files[0];if(!file){notify('请选择 ZIP 文件。','error');return;}const button=$('upload-zip');button.disabled=true;button.textContent='正在解析…';try{const form=new FormData();form.append('file',file);state.batch=await api(`/api/exams/${state.exam.id}/answer-import/batches/preview`,{method:'POST',body:form});renderBatch();notify('答卷解析完成，请处理异常后开始评分。','success');}catch(error){notify(error.message,'error');}finally{button.disabled=false;button.textContent='上传并解析';}}
+function renderBatch(){
+    const batch=state.batch;if(!batch)return;const pending=batch.students.filter(pendingConfirmation);const recoverable=batch.students.filter(s=>s.reviewStatus==='CONFIRMED');const unresolved=[...pending.filter(s=>s.parseStatus!=='SUCCESS'),...recoverable];const normal=pending.filter(s=>s.parseStatus==='SUCCESS');
+    $('batch-summary').innerHTML=`<div class="metric-row"><div class="metric"><span>学生</span><strong>${batch.uploadedStudentCount}</strong></div><div class="metric"><span>正常</span><strong>${batch.parseSuccessCount}</strong></div><div class="metric"><span>待处理异常</span><strong>${unresolved.length}</strong></div><div class="metric"><span>已导入</span><strong>${batch.importedCount}</strong></div></div>`;
+    const abnormalHtml=unresolved.map(s=>studentCard(s,true)).join('');const normalHtml=normal.length?`<details class="student-card"><summary>${normal.length} 份正常答卷（点击查看详情）</summary><div>${normal.map(s=>studentCard(s,false,true)).join('')}</div></details>`:'';const imported=batch.students.filter(s=>s.reviewStatus==='IMPORTED');const importedHtml=imported.length?`<details class="student-card"><summary>${imported.length} 份已导入答卷</summary>${imported.map(s=>`<p>${escapeHtml(s.studentNo)} · ${escapeHtml(s.studentName)} · submissionId ${s.submissionId}</p>`).join('')}</details>`:'';
+    $('batch-students').innerHTML=(abnormalHtml||normalHtml||importedHtml)?`${abnormalHtml}${normalHtml}${importedHtml}`:'<div class="empty">暂无待处理答卷。</div>';
+    document.querySelectorAll('[data-save-student]').forEach(button=>button.onclick=()=>saveStudentCorrection(Number(button.dataset.saveStudent)));
+    $('workflow-action').classList.toggle('hidden',batch.uploadedStudentCount===0);
+    $('confirm-import-grade').disabled=!state.exam.standardsReviewed||unresolved.length>0;
+    $('confirm-import-grade').textContent=unresolved.length?`还有 ${unresolved.length} 份异常待处理`:'确认并开始评分';
 }
-
-function renumberQuestions() {
-    [...document.querySelectorAll('.question-edit-card')].forEach((card, index) => card.querySelector('.question-index').textContent = `第 ${index + 1} 题`);
+function studentCard(student,editable,nested=false){
+    const issues=(student.issues||[]).map(i=>`<li>${escapeHtml(i.message)}</li>`).join('');const answers=student.answers.map(a=>editable?`<div class="answer-row"><label class="field">对应题目<select class="answer-question" data-answer-id="${a.id}">${state.exam.questions.map(q=>`<option value="${q.id}" ${q.id===a.questionId?'selected':''}>第 ${q.questionNo} 题 · ${typeName(q.questionType)}</option>`).join('')}</select></label><label class="field">答案原文<textarea class="answer-text" data-answer-id="${a.id}">${escapeHtml(a.rawAnswer)}</textarea></label></div>`:`<div class="answer-row"><strong>第 ${a.questionNo||a.sourceQuestionNo||'?'} 题 · ${typeName(a.questionType||a.sourceQuestionType)}</strong><div class="standard-value">${escapeHtml(a.rawAnswer)}</div></div>`).join('');
+    const body=`${editable?`<div class="form-grid"><label class="field">学号<input class="student-no" value="${escapeHtml(student.studentNo||student.detectedStudentNo||'')}"></label><label class="field">姓名<input class="student-name" value="${escapeHtml(student.studentName||student.detectedStudentName||'')}"></label></div>`:`<p>${escapeHtml(student.studentNo)} · ${escapeHtml(student.studentName)}</p>`}${issues?`<div class="issues"><strong>发现的问题</strong><ul>${issues}</ul></div>`:''}<div>${answers}</div>${editable?`<div class="actions end"><button class="button primary" data-save-student="${student.id}">保存修正</button></div>`:''}`;
+    if(nested)return `<div class="standard-value">${body}</div>`;return `<details class="student-card problem" data-student-card="${student.id}" open><summary>${escapeHtml(student.studentNo||student.detectedStudentNo||'未知学号')} · ${escapeHtml(student.studentName||student.detectedStudentName||'未知姓名')} · ${parseStatusName(student.parseStatus)}</summary>${body}</details>`;
 }
-
-function collectExamRequest() {
-    const name = $('exam-name').value.trim();
-    const cards = [...document.querySelectorAll('.question-edit-card')];
-    if (!name || !cards.length) throw new Error('请填写考试名称并至少添加一道题');
-    return { name, questions: cards.map((card, index) => {
-        const type = card.querySelector('.q-type').value;
-        const rubricLines = card.querySelector('.q-rubrics').value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-        const rubricItems = rubricLines.map((line, itemIndex) => {
-            const split = line.lastIndexOf('|');
-            if (split < 1) throw new Error(`第 ${index + 1} 题评分点格式应为“名称|分值”`);
-            return { itemOrder: itemIndex + 1, name: line.slice(0, split).trim(), maxScore: Number(line.slice(split + 1).trim()) };
-        });
-        return {
-            questionNo: index + 1, questionType: type,
-            content: card.querySelector('.q-content').value.trim(),
-            maxScore: Number(card.querySelector('.q-max').value),
-            referenceAnswer: card.querySelector('.q-reference').value.trim(),
-            gradingCriteria: card.querySelector('.q-criteria').value.trim() || null,
-            fillBlankGradingMode: type === 'FILL_BLANK' ? card.querySelector('.q-fill-mode').value : null,
-            rubricItems
-        };
-    }) };
+async function saveStudentCorrection(studentId){
+    const student=state.batch.students.find(s=>s.id===studentId),card=document.querySelector(`[data-student-card="${studentId}"]`);try{const answers=student.answers.map(a=>({answerId:a.id,questionId:Number(card.querySelector(`.answer-question[data-answer-id="${a.id}"]`).value),answerText:card.querySelector(`.answer-text[data-answer-id="${a.id}"]`).value}));await api(`/api/answer-import/batches/${state.batch.id}/students/${studentId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({studentNo:card.querySelector('.student-no').value.trim(),studentName:card.querySelector('.student-name').value.trim(),expectedVersion:student.version,answers})});state.batch=await api(`/api/answer-import/batches/${state.batch.id}`);renderBatch();notify('异常答卷已修正，可以继续。','success');}catch(error){notify(error.message,'error');}
 }
+async function confirmImportAndGrade(){const button=$('confirm-import-grade');button.disabled=true;button.textContent='正在导入并启动评分…';try{const result=await api(`/api/answer-import/batches/${state.batch.id}/confirm-import-and-grade`,{method:'POST'});state.task=result.gradingTask;state.batch=await api(`/api/answer-import/batches/${state.batch.id}`);renderBatch();renderTask();scheduleTaskPoll();if(result.importResult.failures.length)notify(`评分已启动，但有 ${result.importResult.failures.length} 份答卷导入失败，可修正后重试。`,'error');else notify('答卷已导入，建议评分已启动。','success');}catch(error){notify(`${error.message}。修正问题后可再次点击，已完成的步骤不会重复。`,'error');}finally{button.disabled=false;button.textContent='确认并开始评分';}}
+function renderTask(){const task=state.task;if(!task)return;const percent=task.totalCount?Math.round(task.processedCount/task.totalCount*100):0;const failures=(task.items||[]).filter(i=>i.status==='FAILED');$('task-view').innerHTML=`<div class="task-card"><div class="card-heading"><strong>建议评分 · ${taskStatusName(task.status)}</strong><span>${task.processedCount}/${task.totalCount}</span></div><div class="progress"><span style="width:${percent}%"></span></div><div class="summary-line"><span class="summary-chip">成功 ${task.successCount}</span><span class="summary-chip">失败 ${task.failedCount}</span></div>${failures.length?`<div class="issues"><strong>失败答卷</strong><ul>${failures.map(i=>`<li>${escapeHtml(i.studentNo)} ${escapeHtml(i.studentName)}：${escapeHtml(i.errorMessage||'评分失败')}</li>`).join('')}</ul></div>`:''}</div>`;$('retry-grading').classList.toggle('hidden',!failures.length);$('view-results').classList.toggle('hidden',task.status==='RUNNING'||task.status==='PENDING');}
+function scheduleTaskPoll(){clearTimeout(state.pollTimer);state.pollTimer=setTimeout(async()=>{try{state.task=await api(`/api/grading/tasks/${state.task.id}`);renderTask();if(state.task.status==='RUNNING'||state.task.status==='PENDING')scheduleTaskPoll();}catch(error){notify(error.message,'error');}},1200);}
+async function retryTask(){try{state.task=await api(`/api/grading/tasks/${state.task.id}/retry-failed`,{method:'POST'});renderTask();scheduleTaskPoll();notify('已重试失败答卷。','success');}catch(error){notify(error.message,'error');}}
 
-async function createExam() {
-    try {
-        const created = await api('/api/exams', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(collectExamRequest()) });
-        $('exam-name').value = ''; $('question-editor').innerHTML = '';
-        notify('评分方案已创建，请继续核对并确认评分标准。', 'success');
-        await loadExams(created.id);
-    } catch (error) { notify(error.message, 'error'); }
+async function loadClassResults(){if(!state.exam)return;try{state.classResults=await api(`/api/exams/${state.exam.id}/class-results`);renderClassResults();}catch(error){notify(error.message,'error');}}
+function suggestionText(submission){const qmap=new Map(state.classResults.questions.map(q=>[q.questionId,q]));let score=0,covered=0,total=0,complete=true;state.classResults.questions.forEach(q=>total+=Number(q.maxScore));const byId=new Map(submission.questionScores.map(q=>[q.questionId,q]));state.classResults.questions.forEach(q=>{const item=byId.get(q.questionId);if(item&&item.suggestedScore!=null){score+=Number(item.suggestedScore);covered+=Number(q.maxScore);}else complete=false;});return complete?`建议 ${money(score)} / ${money(total)}`:`已建议 ${money(score)} / ${money(covered)}，另有 ${money(total-covered)} 分待人工评分`;}
+function renderClassResults(){
+    const data=state.classResults,complete=data.submissions.filter(s=>s.completionStatus==='COMPLETE').length;$('class-summary').innerHTML=`<span class="summary-chip">学生 ${data.submissions.length}</span><span class="summary-chip">已完成审核 ${complete}</span><span class="summary-chip">待完成 ${data.submissions.length-complete}</span>`;
+    $('class-results').innerHTML=data.submissions.length?`<table><thead><tr><th>学号</th><th>姓名</th><th>建议评分</th><th>审核状态</th><th>最终成绩</th></tr></thead><tbody>${data.submissions.map((s,index)=>`<tr class="clickable" data-review-index="${index}"><td>${escapeHtml(s.studentNo)}</td><td>${escapeHtml(s.studentName)}</td><td><div class="suggestion-note">${suggestionText(s)}</div></td><td>${s.confirmedQuestionCount}/${s.questionCount} ${s.completionStatus==='COMPLETE'?'<span class="badge success">已完成</span>':'<span class="badge warning">待审核</span>'}</td><td><strong>${s.finalScore==null?'未完成':money(s.finalScore)}</strong></td></tr>`).join('')}</tbody></table>`:'<div class="empty">尚无正式导入的答卷。</div>';
+    document.querySelectorAll('[data-review-index]').forEach(row=>row.onclick=()=>openReview(Number(row.dataset.reviewIndex)));
 }
+async function openReview(index){const student=state.classResults.submissions[index];state.reviewIndex=index;try{const [results,summary]=await Promise.all([api(`/api/submissions/${student.submissionId}/results`),api(`/api/submissions/${student.submissionId}/summary`)]);$('results-list-view').classList.add('hidden');$('review-detail-view').classList.remove('hidden');$('review-title').textContent=`${student.studentNo} · ${student.studentName}`;$('review-summary').innerHTML=`<div class="summary-line"><span class="summary-chip">已审核 ${summary.confirmedQuestionCount}/${summary.questionCount}</span><span class="summary-chip">当前确认分 ${money(summary.confirmedScore)}</span><span class="summary-chip">最终成绩 ${summary.finalScore==null?'未完成':money(summary.finalScore)}</span></div>`;renderReviewResults(results);$('review-next').disabled=index>=state.classResults.submissions.length-1;}catch(error){notify(error.message,'error');}}
+function renderReviewResults(results){const sorted=[...results].sort((a,b)=>{const ap=a.reviewStatus==='CONFIRMED'?1:0,bp=b.reviewStatus==='CONFIRMED'?1:0;return ap-bp||a.questionNo-b.questionNo;});$('review-results').innerHTML=sorted.map(result=>`<details class="review-card ${result.reviewStatus==='CONFIRMED'?'':'pending'}" data-result-id="${result.id}" ${result.reviewStatus==='CONFIRMED'?'':'open'}><summary>第 ${result.questionNo} 题 · ${typeName(result.questionType)} · ${result.reviewStatus==='CONFIRMED'?`已确认 ${money(result.actualScore)} 分`:'待审核'}</summary><div class="standard-value"><strong>题目</strong>${escapeHtml(result.question)}</div><div class="standard-value"><strong>学生答案</strong>${escapeHtml(result.studentAnswer)}</div><div class="standard-value"><strong>标准答案</strong>${escapeHtml(result.referenceAnswer)}</div><div class="standard-value"><strong>建议评分</strong>${result.suggestedScore==null?'无有效建议分':`${money(result.suggestedScore)} / ${money(result.maxScore)}`}</div><div class="standard-value"><strong>评分理由</strong>${escapeHtml(result.reason||result.failureMessage||'自动评分未生成理由，需教师人工评分。')}</div>${(result.criterionScores||[]).length?`<div class="standard-value"><strong>评分点建议</strong>${result.criterionScores.map(i=>`${escapeHtml(i.criterion)}：${money(i.suggestedScore)}/${money(i.maxScore)}，${escapeHtml(i.reason)}`).join('<br>')}</div>`:''}<div class="score-controls"><label class="field">实际分（满分 ${money(result.maxScore)}）<input class="actual-score" type="number" min="0" max="${result.maxScore}" step="0.01" value="${result.actualScore??result.suggestedScore??''}"></label>${result.suggestedScore!=null?`<button class="button secondary accept-score" data-result-id="${result.id}">接受建议分</button>`:''}<button class="button primary set-score" data-result-id="${result.id}">${result.reviewStatus==='CONFIRMED'?'修改实际分':'确认实际分'}</button></div></details>`).join('');document.querySelectorAll('.accept-score').forEach(b=>b.onclick=()=>reviewScore(Number(b.dataset.resultId),'ACCEPT_SUGGESTION'));document.querySelectorAll('.set-score').forEach(b=>b.onclick=()=>reviewScore(Number(b.dataset.resultId),'SET_SCORE'));state.currentReviewResults=results;}
+async function reviewScore(resultId,action){const result=state.currentReviewResults.find(r=>r.id===resultId),card=document.querySelector(`[data-result-id="${resultId}"]`);const payload={action,expectedVersion:result.version};if(action==='SET_SCORE'){const raw=card.querySelector('.actual-score').value.trim();if(!raw){notify('请填写实际分。','error');return;}payload.actualScore=Number(raw);if(!Number.isFinite(payload.actualScore)){notify('实际分格式不正确。','error');return;}}try{await api(`/api/grading/results/${resultId}/review`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});await loadClassResults();await openReview(state.reviewIndex);notify('实际分已保存。','success');}catch(error){notify(error.message,'error');}}
 
-async function confirmStandards() {
-    if (!confirm('确认题干、标准答案、满分和评分细则均已核对？')) return;
-    try { state.exam = await api(`/api/exams/${state.exam.id}/standards/confirm`, {method:'PUT'}); renderExam(); await loadExams(state.exam.id); notify('评分标准已确认，可以启动批量评分。', 'success'); }
-    catch (error) { notify(error.message, 'error'); }
-}
+function showExamLibrary(){showView('exam-library-view');loadExams().catch(error=>notify(error.message,'error'));}
+function showSettings(){showView('settings-panel');loadAiSettings();}
+async function loadAiSettings(){try{state.aiSettings=await api('/api/settings/ai');$('ai-base-url').value=state.aiSettings.baseUrl||'';$('ai-model').value=state.aiSettings.model||'';$('ai-api-key').value='';$('ai-config-badge').textContent=state.aiSettings.configured?'已配置':'未完成配置';$('ai-config-badge').className=`badge ${state.aiSettings.configured?'success':'warning'}`;$('ai-config-summary').textContent=`当前来源：${state.aiSettings.source==='SAVED_LOCAL'?'网页保存配置':'环境变量'}。${state.aiSettings.statusMessage||''}`;}catch(error){notify(error.message,'error');}}
+function aiRequest(){return {apiKey:$('ai-api-key').value.trim()||null,baseUrl:$('ai-base-url').value.trim(),model:$('ai-model').value.trim()};}
+async function saveAiSettings(){try{state.aiSettings=await api('/api/settings/ai',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(aiRequest())});$('ai-api-key').value='';await loadAiSettings();notify('AI 配置已保存，新评分请求立即使用该配置。','success');}catch(error){notify(error.message,'error');}}
+async function testAiConnection(){if(!confirm('测试连接会向 AI 服务发送一次最小请求，可能产生少量费用。是否继续？'))return;const button=$('test-ai-connection');button.disabled=true;button.textContent='正在测试…';try{const result=await api('/api/settings/ai/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(aiRequest())});notify(result.message,'success');}catch(error){notify(error.message,'error');}finally{button.disabled=false;button.textContent='测试连接';}}
 
-async function uploadZip() {
-    const file = $('zip-file').files[0];
-    if (!file) return notify('请选择 ZIP 文件', 'error');
-    const form = new FormData(); form.append('file', file);
-    try {
-        notify('正在上传并解析，请稍候…');
-        state.batch = await api(`/api/exams/${state.exam.id}/answer-import/batches/preview`, {method:'POST', body:form});
-        renderBatch(); notify('ZIP 解析完成，请核对学生和答案。', 'success');
-    } catch (error) { notify(error.message, 'error'); }
-}
+function goHome(){clearTimeout(state.pollTimer);showView('home-view');loadExams().catch(e=>notify(e.message,'error'));}
+function showCreateMethods(origin='home'){state.createOrigin=origin;resetEditor();$('create-methods-back').textContent=origin==='library'?'← 返回试卷库':'← 返回首页';showView('create-methods-view');}
+function showManualCreate(){resetEditor();addQuestion();showView('manual-create-view');}
 
-function renderBatch() {
-    const b = state.batch;
-    const pendingConfirmation = b.students.filter(student => student.reviewStatus === 'PENDING').length;
-    $('batch-summary').innerHTML = `<div class="metric-row"><div class="metric"><span>上传学生</span><strong>${b.uploadedStudentCount}</strong></div>
-        <div class="metric"><span>解析成功</span><strong>${b.parseSuccessCount}</strong></div><div class="metric"><span>解析需核对</span><strong>${b.needsReviewCount}</strong></div>
-        <div class="metric"><span>待确认</span><strong>${pendingConfirmation}</strong></div>
-        <div class="metric"><span>解析失败</span><strong>${b.parseFailedCount}</strong></div><div class="metric"><span>已确认</span><strong>${b.confirmedCount}</strong></div>
-        <div class="metric"><span>已导入</span><strong>${b.importedCount}</strong></div></div>`;
-    $('batch-students').innerHTML = b.students.map(student => `
-        <article class="student-card" data-student-card="${student.id}">
-            <div class="student-head"><div><strong>${escapeHtml(student.studentNo || '未识别')} · ${escapeHtml(student.studentName || '未识别')}</strong>
-                <div class="question-meta">${escapeHtml(student.sourcePath)} · 识别 ${student.recognizedQuestionCount}/${student.expectedQuestionCount}</div></div>
-                <span class="badge ${student.reviewStatus === 'IMPORTED' ? 'success' : student.parseStatus === 'FAILED' ? 'error' : 'warning'}">${student.reviewStatus === 'PENDING' ? student.parseStatus : student.reviewStatus}</span></div>
-            ${student.issues.length ? `<ul class="issue-list">${student.issues.map(i => `<li>${escapeHtml(i.message)}</li>`).join('')}</ul>` : ''}
-            <div class="form-grid"><label class="field">学号<input class="student-no" value="${escapeHtml(student.studentNo || '')}"></label>
-                <label class="field">姓名<input class="student-name" value="${escapeHtml(student.studentName || '')}"></label></div>
-            <div class="student-answers">${student.answers.map(answer => answerEditor(answer)).join('')}</div>
-            <div class="actions">
-                <button class="button secondary small save-student" ${student.reviewStatus !== 'PENDING' ? 'disabled' : ''}>保存修正</button>
-                <button class="button success small confirm-student" ${student.reviewStatus !== 'PENDING' ? 'disabled' : ''}>确认该答卷</button>
-            </div>
-        </article>`).join('');
-    document.querySelectorAll('[data-student-card]').forEach(card => {
-        const id = Number(card.dataset.studentCard);
-        card.querySelector('.save-student').onclick = () => saveStudent(id, card);
-        card.querySelector('.confirm-student').onclick = () => confirmStudent(id);
-    });
-    $('import-confirmed').classList.toggle('hidden', b.confirmedCount === 0);
-}
+$('home-button').onclick=goHome;$('workspace-home').onclick=goHome;$('workspace-library').onclick=showExamLibrary;$('show-settings').onclick=showSettings;$('show-create-methods').onclick=()=>showCreateMethods('home');$('show-exam-library').onclick=showExamLibrary;$('create-methods-back').onclick=()=>state.createOrigin==='library'?showExamLibrary():goHome();document.querySelectorAll('[data-go-home]').forEach(b=>b.onclick=goHome);document.querySelectorAll('[data-go-create]').forEach(b=>b.onclick=()=>showCreateMethods(state.createOrigin));document.querySelectorAll('[data-open-ai-settings]').forEach(b=>b.onclick=showSettings);
+$('show-ai-import').onclick=()=>showView('ai-import-view');$('show-manual-create').onclick=showManualCreate;$('preview-exam-docx').onclick=importExamDocx;$('add-question').onclick=()=>addQuestion();$('exam-form').onsubmit=createExam;$('management-create').onclick=()=>showCreateMethods('library');
+document.querySelectorAll('[data-workspace-tab]').forEach(b=>b.onclick=()=>showWorkspaceTab(b.dataset.workspaceTab));
+$('exam-library-search').oninput=renderExamLists;
+$('confirm-standards').onclick=async()=>{try{state.exam=await api(`/api/exams/${state.exam.id}/standards/confirm`,{method:'PUT'});renderExam();await loadExams();notify('评分标准已确认，可以开始批改。','success');}catch(error){notify(error.message,'error');}};
+$('begin-grading').onclick=()=>showWorkspaceTab('workflow');$('upload-zip').onclick=uploadZip;$('confirm-import-grade').onclick=confirmImportAndGrade;$('retry-grading').onclick=retryTask;$('view-results').onclick=()=>showWorkspaceTab('results');$('refresh-results').onclick=loadClassResults;$('back-to-students').onclick=()=>{$('review-detail-view').classList.add('hidden');$('results-list-view').classList.remove('hidden');};$('review-next').onclick=()=>openReview(state.reviewIndex+1);$('save-ai-settings').onclick=saveAiSettings;$('test-ai-connection').onclick=testAiConnection;
 
-function answerEditor(answer) {
-    const options = state.exam.questions.map(q => `<option value="${q.id}" ${q.id === answer.questionId ? 'selected' : ''}>第 ${q.questionNo} 题 · ${typeName(q.questionType)}</option>`).join('');
-    return `<div class="answer-edit" data-answer-id="${answer.id}"><label class="field">题目映射<select class="answer-question">${options}</select></label>
-        <label class="field">原始答案<textarea class="answer-text" rows="3">${escapeHtml(answer.rawAnswer)}</textarea></label></div>`;
-}
-
-async function saveStudent(studentId, card) {
-    const student = state.batch.students.find(s => s.id === studentId);
-    const answers = [...card.querySelectorAll('[data-answer-id]')].map(row => ({answerId:Number(row.dataset.answerId), questionId:Number(row.querySelector('.answer-question').value), answerText:row.querySelector('.answer-text').value}));
-    try {
-        await api(`/api/answer-import/batches/${state.batch.id}/students/${studentId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({studentNo:card.querySelector('.student-no').value.trim(), studentName:card.querySelector('.student-name').value.trim(), expectedVersion:student.version, answers})});
-        await reloadBatch(); notify('修正已保存。', 'success');
-    } catch (error) { notify(error.message, 'error'); }
-}
-
-async function confirmStudent(studentId) {
-    const student = state.batch.students.find(s => s.id === studentId);
-    try { await api(`/api/answer-import/batches/${state.batch.id}/students/${studentId}/confirm`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({expectedVersion:student.version})}); await reloadBatch(); notify('答卷已确认。', 'success'); }
-    catch (error) { notify(error.message, 'error'); }
-}
-
-async function reloadBatch() { state.batch = await api(`/api/answer-import/batches/${state.batch.id}`); renderBatch(); }
-
-async function loadLatestBatch() {
-    if (!state.exam) return;
-    try {
-        state.batch = await api(`/api/exams/${state.exam.id}/answer-import/batches/latest`);
-        renderBatch();
-    } catch (error) {
-        if (error.status !== 404) notify(error.message, 'error');
-    }
-}
-
-async function importConfirmed() {
-    try {
-        const result = await api(`/api/answer-import/batches/${state.batch.id}/import`, {method:'POST'});
-        await reloadBatch();
-        notify(`本次导入 ${result.importedCount} 份，剩余待导入 ${result.remainingConfirmedCount} 份。`, result.failures.length ? 'error' : 'success');
-    } catch (error) { notify(error.message, 'error'); }
-}
-
-async function startGrading() {
-    try {
-        state.task = await api(`/api/exams/${state.exam.id}/grading-tasks`, {method:'POST'});
-        renderTask(); beginPolling();
-    } catch (error) { notify(error.message, 'error'); }
-}
-
-async function retryGrading() {
-    try { state.task = await api(`/api/grading/tasks/${state.task.id}/retry-failed`, {method:'POST'}); renderTask(); beginPolling(); }
-    catch (error) { notify(error.message, 'error'); }
-}
-
-function beginPolling() {
-    clearInterval(state.pollTimer);
-    if (!state.task || state.task.status !== 'RUNNING') return;
-    state.pollTimer = setInterval(async () => {
-        try { state.task = await api(`/api/grading/tasks/${state.task.id}`); renderTask(); if (state.task.status !== 'RUNNING') { clearInterval(state.pollTimer); await loadClassResults(); } }
-        catch (error) { clearInterval(state.pollTimer); notify(error.message, 'error'); }
-    }, 1000);
-}
-
-function renderTask() {
-    const t = state.task;
-    if (!t) { $('task-view').innerHTML = '<p class="score-pending">尚未启动批量评分。</p>'; return; }
-    const percent = t.totalCount ? Math.round(t.processedCount * 100 / t.totalCount) : 0;
-    $('task-view').innerHTML = `<div class="metric-row"><div class="metric"><span>任务状态</span><strong>${t.status}</strong></div><div class="metric"><span>进度</span><strong>${t.processedCount}/${t.totalCount}</strong></div><div class="metric"><span>成功</span><strong>${t.successCount}</strong></div><div class="metric"><span>失败</span><strong>${t.failedCount}</strong></div></div>
-        <div class="progress"><div style="width:${percent}%"></div></div>
-        <table><thead><tr><th>学号</th><th>姓名</th><th>状态</th><th>尝试次数</th><th>错误</th></tr></thead><tbody>${t.items.map(i => `<tr><td>${escapeHtml(i.studentNo)}</td><td>${escapeHtml(i.studentName)}</td><td>${i.status}</td><td>${i.attemptCount}</td><td>${escapeHtml(i.errorMessage || '')}</td></tr>`).join('')}</tbody></table>`;
-    $('retry-grading').classList.toggle('hidden', t.failedCount === 0 || t.status === 'RUNNING');
-}
-
-async function loadClassResults() {
-    if (!state.exam) return;
-    try { state.classResults = await api(`/api/exams/${state.exam.id}/class-results`); renderClassResults(); }
-    catch (error) { notify(error.message, 'error'); }
-}
-
-async function loadLatestTask() {
-    if (!state.exam) return;
-    try {
-        state.task = await api(`/api/exams/${state.exam.id}/grading-tasks/latest`);
-        renderTask();
-        beginPolling();
-    } catch (error) {
-        if (error.status !== 404) notify(error.message, 'error');
-    }
-}
-
-function renderClassResults() {
-    const data = state.classResults;
-    if (!data || !data.submissions.length) { $('class-results').innerHTML = '<p class="score-pending">尚无正式导入的答卷。</p>'; return; }
-    $('class-results').innerHTML = `<table><thead><tr><th>学号</th><th>姓名</th><th>审核进度</th>${data.questions.map(q => `<th>第${q.questionNo}题<br>${money(q.maxScore)}</th>`).join('')}<th>最终总分</th></tr></thead><tbody>
-        ${data.submissions.map(s => `<tr class="clickable" data-submission-id="${s.submissionId}"><td>${escapeHtml(s.studentNo)}</td><td>${escapeHtml(s.studentName)}</td><td>${s.confirmedQuestionCount}/${s.questionCount}</td>
-            ${s.questionScores.map(score => `<td class="${score.actualScore != null ? 'score-confirmed' : score.suggestedScore != null ? 'score-suggested' : 'score-pending'}">${score.actualScore != null ? money(score.actualScore) : score.suggestedScore != null ? `建议 ${money(score.suggestedScore)}` : '待评分'}</td>`).join('')}
-            <td class="${s.finalScore != null ? 'score-confirmed' : 'score-pending'}">${s.finalScore != null ? money(s.finalScore) : '未完成'}</td></tr>`).join('')}</tbody></table>`;
-    document.querySelectorAll('[data-submission-id]').forEach(row => row.onclick = () => openReview(Number(row.dataset.submissionId)));
-}
-
-async function openReview(submissionId) {
-    try {
-        const [results, summary] = await Promise.all([api(`/api/submissions/${submissionId}/results`), api(`/api/submissions/${submissionId}/summary`)]);
-        $('review-drawer').classList.remove('hidden');
-        $('review-title').textContent = `${summary.studentNo} · ${summary.studentName} · 逐题审核`;
-        $('review-summary').innerHTML = `<div class="metric-row"><div class="metric"><span>已确认</span><strong>${summary.confirmedQuestionCount}/${summary.questionCount}</strong></div><div class="metric"><span>当前确认分</span><strong>${money(summary.confirmedScore)}</strong></div><div class="metric"><span>最终总分</span><strong>${summary.finalScore == null ? '未完成' : money(summary.finalScore)}</strong></div></div>`;
-        $('review-results').innerHTML = results.map(renderReviewCard).join('') || '<p class="score-pending">该答卷尚未生成评分记录。</p>';
-        document.querySelectorAll('[data-result-id]').forEach(card => bindReviewActions(card, results.find(r => r.id === Number(card.dataset.resultId)), submissionId));
-        $('review-drawer').scrollIntoView({behavior:'smooth'});
-    } catch (error) { notify(error.message, 'error'); }
-}
-
-function renderReviewCard(result) {
-    const programming = result.questionType === 'PROGRAMMING';
-    return `<article class="review-card" data-result-id="${result.id}"><div class="review-head"><strong>第 ${result.questionNo} 题 · ${typeName(result.questionType)}</strong><span class="badge ${result.reviewStatus === 'CONFIRMED' ? 'success' : result.gradingStatus === 'FAILED' ? 'error' : 'warning'}">${result.reviewStatus === 'CONFIRMED' ? '已确认' : result.gradingStatus}</span></div>
-        ${programming ? '<div class="callout"><strong>编程题未实际运行代码</strong><p>当前系统只保存文字答案，请教师阅读后人工给分。</p></div>' : ''}
-        <div class="review-grid"><div><div class="answer-box"><strong>题目</strong><br>${escapeHtml(result.question)}</div><div class="answer-box"><strong>标准答案</strong><br>${escapeHtml(result.referenceAnswer)}</div></div><div><pre class="answer-box"><strong>学生答案</strong>\n${escapeHtml(result.studentAnswer)}</pre><div class="answer-box"><strong>评分理由</strong><br>${escapeHtml(result.reason || result.failureMessage || '暂无')}</div></div></div>
-        ${result.criterionScores.length ? `<ul class="rubrics">${result.criterionScores.map(c => `<li>${escapeHtml(c.criterion)}：建议 ${money(c.suggestedScore)}/${money(c.maxScore)}，${escapeHtml(c.reason)}</li>`).join('')}</ul>` : ''}
-        <div class="review-actions"><span>建议分：<strong>${money(result.suggestedScore)}</strong> / ${money(result.maxScore)}</span>
-            <button class="button secondary small accept-score" ${result.gradingStatus !== 'SUCCESS' ? 'disabled' : ''}>接受建议分</button>
-            <label class="field">实际分<input class="actual-score" type="number" min="0" max="${result.maxScore}" step="0.01" value="${result.actualScore ?? result.suggestedScore ?? ''}"></label>
-            <button class="button success small set-score" ${result.gradingStatus === 'RUNNING' ? 'disabled' : ''}>确认实际分</button>
-            <button class="button ghost small retry-result" ${result.gradingStatus !== 'FAILED' || result.reviewStatus === 'CONFIRMED' ? 'disabled' : ''}>重试自动评分</button></div></article>`;
-}
-
-function bindReviewActions(card, result, submissionId) {
-    card.querySelector('.accept-score').onclick = () => submitReview(result, 'ACCEPT_SUGGESTION', null, submissionId);
-    card.querySelector('.set-score').onclick = () => {
-        const input = card.querySelector('.actual-score').value.trim();
-        if (input === '' || !Number.isFinite(Number(input))) {
-            notify('请输入有效的实际分数。', 'error');
-            return;
-        }
-        submitReview(result, 'SET_SCORE', Number(input), submissionId);
-    };
-    card.querySelector('.retry-result').onclick = async () => { try { await api(`/api/grading/results/${result.id}/retry`, {method:'POST'}); await openReview(submissionId); } catch(error){ notify(error.message,'error'); } };
-}
-
-async function submitReview(result, action, actualScore, submissionId) {
-    try {
-        await api(`/api/grading/results/${result.id}/review`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action, actualScore, expectedVersion:result.version})});
-        await Promise.all([openReview(submissionId), loadClassResults()]); notify('实际分已确认。', 'success');
-    } catch (error) { notify(error.message, 'error'); }
-}
-
-function showTab(name) {
-    document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
-    document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.toggle('hidden', panel.id !== `tab-${name}`));
-    if (name === 'import') loadLatestBatch();
-    if (name === 'grading') loadLatestTask();
-    if (name === 'results') loadClassResults();
-}
-
-$('refresh-exams').onclick = () => loadExams(state.exam?.id);
-$('show-create-exam').onclick = showCreateExam;
-$('cancel-create-exam').onclick = () => { $('create-exam-panel').classList.add('hidden'); state.exam ? $('exam-workspace').classList.remove('hidden') : $('empty-state').classList.remove('hidden'); };
-$('add-question').onclick = () => addQuestion();
-$('create-exam').onclick = createExam;
-$('confirm-standards').onclick = confirmStandards;
-$('upload-zip').onclick = uploadZip;
-$('import-confirmed').onclick = importConfirmed;
-$('start-grading').onclick = startGrading;
-$('retry-grading').onclick = retryGrading;
-$('refresh-results').onclick = loadClassResults;
-$('close-review').onclick = () => $('review-drawer').classList.add('hidden');
-document.querySelectorAll('.tab').forEach(tab => tab.onclick = () => showTab(tab.dataset.tab));
-
-loadExams();
+loadExams().catch(error=>notify(error.message,'error'));

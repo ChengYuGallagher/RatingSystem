@@ -15,39 +15,46 @@ import java.util.Map;
 public class DeepSeekAiClient implements AiClient {
 
     private final RestClient restClient;
-    private final AiProperties properties;
+    private final AiConfigProvider configProvider;
 
     public DeepSeekAiClient(
             @Qualifier("deepSeekRestClient") RestClient restClient,
-            AiProperties properties
+            AiConfigProvider configProvider
     ) {
         this.restClient = restClient;
-        this.properties = properties;
+        this.configProvider = configProvider;
     }
 
     @Override
     public String complete(String systemPrompt, String userPrompt) {
-        if (!StringUtils.hasText(properties.apiKey())) {
-            throw new AiGradingException("未配置 AI_API_KEY，无法执行 AI 评分");
+        return complete(systemPrompt, userPrompt, -1);
+    }
+
+    @Override
+    public String complete(String systemPrompt, String userPrompt, int requestedMaxTokens) {
+        AiRuntimeConfig config = configProvider.current();
+        if (!config.configured()) {
+            throw new AiGradingException("AI 尚未完整配置，请在系统设置中填写并保存配置");
         }
+        int maxTokens = requestedMaxTokens > 0 ? Math.min(requestedMaxTokens, 16_000) : config.maxTokens();
 
         Map<String, Object> requestBody = Map.of(
-                "model", properties.model(),
+                "model", config.model(),
                 "messages", List.of(
                         Map.of("role", "system", "content", systemPrompt),
                         Map.of("role", "user", "content", userPrompt)
                 ),
                 "response_format", Map.of("type", "json_object"),
                 "thinking", Map.of("type", "disabled"),
-                "max_tokens", properties.maxTokens(),
+                "max_tokens", maxTokens,
                 "stream", false
         );
 
         try {
             ChatCompletionResponse response = restClient.post()
-                    .uri("/chat/completions")
+                    .uri(config.chatCompletionsUri())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .headers(headers -> headers.setBearerAuth(properties.apiKey()))
+                    .headers(headers -> headers.setBearerAuth(config.apiKey()))
                     .body(requestBody)
                     .retrieve()
                     .body(ChatCompletionResponse.class);

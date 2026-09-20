@@ -47,11 +47,31 @@ class TeacherWorkflowIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("RatingSystem")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"zip-file\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"exam-library-view\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"settings-panel\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"show-exam-library\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"exam-library-search\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"management-exam-list\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"management-ai\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("data-management-tab"))))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("id=\"exam-picker-list\""))))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"show-ai-import\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"confirm-import-grade\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"ai-api-key\"")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("/app.js")));
         mockMvc.perform(get("/app.js"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("saveQuestionStandard")))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("pendingConfirmation")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("pendingConfirmation")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/api/exam-import/preview")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/confirm-import-and-grade")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("/api/settings/ai")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("function showExamLibrary()")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("function showSettings()")))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("showManagementTab"))));
 
         JsonNode exams = performJson(get("/api/exams"));
         JsonNode listed = findById(exams, exam.get("id").longValue());

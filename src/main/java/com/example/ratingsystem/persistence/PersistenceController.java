@@ -3,6 +3,7 @@ package com.example.ratingsystem.persistence;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -31,12 +32,15 @@ public class PersistenceController {
     private final ExamPersistenceService examService;
     private final PersistedGradingService gradingService;
     private final SubmissionScoreSummaryService summaryService;
+    private final ExamDeletionService deletionService;
 
     public PersistenceController(ExamPersistenceService examService, PersistedGradingService gradingService,
-                                 SubmissionScoreSummaryService summaryService) {
+                                 SubmissionScoreSummaryService summaryService,
+                                 ExamDeletionService deletionService) {
         this.examService = examService;
         this.gradingService = gradingService;
         this.summaryService = summaryService;
+        this.deletionService = deletionService;
     }
 
     @PostMapping("/exams")
@@ -53,6 +57,12 @@ public class PersistenceController {
     @GetMapping("/exams/{examId}")
     ExamView getExam(@PathVariable Long examId) {
         return examService.getExam(examId);
+    }
+
+    @DeleteMapping("/exams/{examId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    void deleteExam(@PathVariable Long examId) {
+        deletionService.deleteEmptyExam(examId);
     }
 
     @PutMapping("/exams/{examId}/standards/confirm")

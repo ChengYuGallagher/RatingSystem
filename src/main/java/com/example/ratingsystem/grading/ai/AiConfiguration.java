@@ -8,7 +8,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(AiProperties.class)
+@EnableConfigurationProperties({AiProperties.class, AiSettingsProperties.class})
 public class AiConfiguration {
 
     @Bean
@@ -19,7 +19,6 @@ public class AiConfiguration {
         requestFactory.setReadTimeout(properties.readTimeout());
 
         return RestClient.builder()
-                .baseUrl(properties.baseUrl().toString())
                 .requestFactory(requestFactory)
                 .build();
     }

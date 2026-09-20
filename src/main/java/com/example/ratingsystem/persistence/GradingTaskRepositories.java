@@ -12,6 +12,8 @@ import java.util.Optional;
 
 interface GradingTaskJpaRepository extends JpaRepository<GradingTaskEntity, Long> {
 
+    boolean existsByExamId(Long examId);
+
     Optional<GradingTaskEntity> findFirstByExamIdOrderByIdDesc(Long examId);
 
     @EntityGraph(attributePaths = {"exam", "items", "items.submission", "items.submission.student"})
