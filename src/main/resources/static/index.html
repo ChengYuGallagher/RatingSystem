@@ -26,7 +26,7 @@
     <section id="ai-import-view" class="view hidden">
         <div class="back-row"><button class="text-button" data-go-create>← 返回创建方式</button></div>
         <div class="section-heading"><div><p class="eyebrow">AI 导入试卷</p><h1>从 Word 生成试卷草稿</h1><p>原题文字会优先保留；AI 推导与不确定内容必须由教师核对。</p></div></div>
-        <div class="content-panel upload-box vertical"><label class="field">考试试卷 DOCX（必选）<input id="exam-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label class="field">参考答案或评分标准 DOCX（可选）<input id="reference-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><div class="actions"><button id="preview-exam-docx" class="button primary">解析并生成草稿</button><button class="button secondary" data-open-ai-settings>检查 AI 配置</button></div><p class="helper">仅支持文字型 DOCX；扫描图片和 OCR 不在当前范围。此操作会调用已配置的 AI 服务。</p></div>
+        <div class="content-panel upload-box vertical"><label class="field">考试试卷 DOCX（必选）<input id="exam-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label class="field">参考答案或评分标准 DOCX（可选）<input id="reference-docx-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><div class="actions"><button id="preview-exam-docx" class="button primary">解析并生成草稿</button></div><p class="helper">仅支持文字型 DOCX；扫描图片和 OCR 不在当前范围。此操作会调用已配置的 AI 服务；如配置缺失，请前往右上角系统设置。</p></div>
         <div id="exam-import-result"></div>
     </section>
     <section id="manual-create-view" class="view hidden">
@@ -50,6 +50,15 @@
         <section id="workspace-results" class="content-panel workspace-panel hidden"><div id="results-list-view"><div class="section-heading"><div><h2>成绩与审核</h2><p>建议分仅供参考，最终成绩只汇总教师确认的实际分。</p></div><button id="refresh-results" class="button secondary">刷新</button></div><div id="class-summary" class="summary-line"></div><div id="class-results" class="table-scroll"></div></div><div id="review-detail-view" class="hidden"><div class="section-heading"><div><p class="eyebrow">逐题审核</p><h2 id="review-title">—</h2></div><button id="back-to-students" class="button secondary">返回学生列表</button></div><div id="review-summary"></div><div id="review-results" class="review-results"></div><div class="panel-footer"><button id="review-next" class="button primary">审核下一名 →</button></div></div></section>
     </section>
 </main>
+<dialog id="delete-exam-dialog" class="confirm-dialog" aria-labelledby="delete-exam-title">
+    <div class="confirm-dialog-body">
+        <h2 id="delete-exam-title">确认删除试卷？</h2>
+        <p>试卷：<strong id="delete-exam-name"></strong></p>
+        <p class="danger-message">删除该试卷将同时永久删除它所关联的学生答卷、解析和导入记录、评分任务、建议评分、人工审核记录及最终成绩等数据。</p>
+        <p>此操作不可撤销。</p>
+        <div class="actions end"><button id="cancel-delete-exam" type="button" class="button secondary">取消</button><button id="confirm-delete-exam" type="button" class="button danger">确认删除</button></div>
+    </div>
+</dialog>
 <template id="question-template"><article class="question-edit-card"><div class="card-heading"><div><strong class="question-index"></strong><span class="draft-flag"></span></div><button type="button" class="remove-question button danger ghost">删除</button></div><div class="form-grid"><label class="field">题型<select class="q-type"><option value="CHOICE">选择题</option><option value="FILL_BLANK">填空题</option><option value="TRUE_FALSE">判断题</option><option value="SHORT_ANSWER">简答题</option><option value="PROGRAMMING">编程题</option></select></label><label class="field">满分<input class="q-max" type="number" min="0.01" step="0.01" value="2"></label><label class="field fill-mode-wrap hidden">填空评分方式<select class="q-fill-mode"><option value="EXACT">精确比对</option><option value="AI">AI 辅助</option></select></label></div><label class="field">题干<textarea class="q-content" rows="3"></textarea></label><label class="field">标准答案<textarea class="q-reference" rows="3"></textarea></label><label class="field">评分细则<textarea class="q-criteria" rows="2" placeholder="客观题可留空"></textarea></label><label class="field">结构化评分点<textarea class="q-rubrics" rows="3" placeholder="每行：评分点名称|分值"></textarea></label></article></template>
 <script src="/app.js"></script>
 </body></html>

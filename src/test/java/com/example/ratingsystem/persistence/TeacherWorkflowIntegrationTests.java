@@ -53,8 +53,13 @@ class TeacherWorkflowIntegrationTests {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"exam-library-search\"")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"management-exam-list\"")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"management-ai\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"delete-exam-dialog\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"cancel-delete-exam\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"confirm-delete-exam\"")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("data-management-tab"))))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("data-open-ai-settings"))))
                 .andExpect(content().string(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("id=\"exam-picker-list\""))))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"show-ai-import\"")))
@@ -70,6 +75,8 @@ class TeacherWorkflowIntegrationTests {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("/api/settings/ai")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("function showExamLibrary()")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("function showSettings()")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("function openDeleteExamDialog")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("function closeDeleteExamDialog")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("showManagementTab"))));
 

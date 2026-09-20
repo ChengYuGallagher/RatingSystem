@@ -20,6 +20,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -340,20 +341,172 @@ class PersistenceApiIntegrationTests {
     }
 
     @Test
-    void deletesOnlyAnExamWithoutSubmissionsOrResults() throws Exception {
+    void deletesEmptyExamAndReturnsNotFoundForRepeatedDelete() throws Exception {
         ExamIds emptyExam = createExamWithChoiceAndShortAnswer();
         mockMvc.perform(delete("/api/exams/{id}", emptyExam.examId()))
                 .andExpect(status().isNoContent());
         mockMvc.perform(get("/api/exams/{id}", emptyExam.examId()))
                 .andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/exams/{id}", emptyExam.examId()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/exams/{id}", 999999L))
+                .andExpect(status().isNotFound());
+    }
 
-        ExamIds usedExam = createExamWithChoiceAndShortAnswer();
-        createSubmission(usedExam, "2026099");
-        mockMvc.perform(delete("/api/exams/{id}", usedExam.examId()))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.detail").value("该试卷已有答卷、评分任务或成绩，不能直接删除"));
-        mockMvc.perform(get("/api/exams/{id}", usedExam.examId()))
+    @Test
+    void deletesCompleteExamGraphWithoutAffectingAnotherExam() throws Exception {
+        ExamIds target = createExamWithChoiceAndShortAnswer();
+        long targetSubmissionId = createSubmission(target, "2026099");
+        gradeAndReviewAll(targetSubmissionId);
+        seedTaskAndImportData(target, targetSubmissionId, "target");
+
+        ExamIds survivor = createExamWithChoiceAndShortAnswer();
+        long survivorSubmissionId = createSubmission(survivor, "2026100");
+        gradeAndReviewAll(survivorSubmissionId);
+        seedTaskAndImportData(survivor, survivorSubmissionId, "survivor");
+
+        List<Integer> targetBefore = examGraphCounts(target.examId());
+        List<Integer> survivorBefore = examGraphCounts(survivor.examId());
+        assertTrue(targetBefore.stream().allMatch(count -> count > 0));
+        assertTrue(survivorBefore.stream().allMatch(count -> count > 0));
+
+        mockMvc.perform(delete("/api/exams/{id}", target.examId()))
+                .andExpect(status().isNoContent());
+
+        assertTrue(examGraphCounts(target.examId()).stream().allMatch(count -> count == 0));
+        assertEquals(survivorBefore, examGraphCounts(survivor.examId()));
+        mockMvc.perform(get("/api/exams/{id}", survivor.examId()))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void rollsBackAllRelatedDeletesWhenFinalExamDeleteFails() throws Exception {
+        ExamIds target = createExamWithChoiceAndShortAnswer();
+        long submissionId = createSubmission(target, "2026101");
+        gradeAndReviewAll(submissionId);
+        seedTaskAndImportData(target, submissionId, "rollback");
+        List<Integer> before = examGraphCounts(target.examId());
+
+        jdbcTemplate.execute("""
+                create table exam_delete_blockers (
+                    id bigint primary key,
+                    exam_id bigint not null,
+                    constraint fk_test_delete_exam foreign key (exam_id) references exams (id)
+                )
+                """);
+        jdbcTemplate.update("insert into exam_delete_blockers (id, exam_id) values (1, ?)", target.examId());
+        try {
+            mockMvc.perform(delete("/api/exams/{id}", target.examId()))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.detail")
+                            .value("试卷删除失败，请确认没有正在执行的操作后重试"));
+
+            assertEquals(before, examGraphCounts(target.examId()));
+            mockMvc.perform(get("/api/exams/{id}", target.examId()))
+                    .andExpect(status().isOk());
+        } finally {
+            jdbcTemplate.update("delete from exam_delete_blockers where exam_id = ?", target.examId());
+            jdbcTemplate.execute("drop table exam_delete_blockers");
+        }
+    }
+
+    private void gradeAndReviewAll(long submissionId) throws Exception {
+        JsonNode results = performJson(post("/api/submissions/{id}/grading", submissionId)).get("results");
+        for (JsonNode result : results) {
+            performJson(put("/api/grading/results/{id}/review", result.get("id").longValue())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(reviewBody("ACCEPT_SUGGESTION", null, result.get("version").longValue())));
+        }
+    }
+
+    private void seedTaskAndImportData(ExamIds exam, long submissionId, String marker) {
+        jdbcTemplate.update("""
+                insert into grading_tasks
+                    (exam_id, status, total_count, processed_count, success_count, failed_count,
+                     created_at, started_at, completed_at)
+                values (?, 'COMPLETED', 1, 1, 1, 0,
+                        current_timestamp, current_timestamp, current_timestamp)
+                """, exam.examId());
+        long taskId = jdbcTemplate.queryForObject(
+                "select max(id) from grading_tasks where exam_id = ?", Long.class, exam.examId());
+        jdbcTemplate.update("""
+                insert into grading_task_items
+                    (task_id, submission_id, status, attempt_count, updated_at)
+                values (?, ?, 'SUCCESS', 1, current_timestamp)
+                """, taskId, submissionId);
+
+        jdbcTemplate.update("""
+                insert into answer_import_batches
+                    (exam_id, original_filename, status, created_at, updated_at)
+                values (?, ?, 'COMPLETED', current_timestamp, current_timestamp)
+                """, exam.examId(), marker + ".zip");
+        long batchId = jdbcTemplate.queryForObject(
+                "select max(id) from answer_import_batches where exam_id = ?", Long.class, exam.examId());
+        jdbcTemplate.update("""
+                insert into answer_import_students
+                    (batch_id, source_path, detected_student_no, detected_student_name,
+                     student_no, student_name, expected_question_count, recognized_question_count,
+                     parse_status, review_status, submission_id, version)
+                values (?, ?, ?, '测试学生', ?, '测试学生', 2, 2, 'SUCCESS', 'IMPORTED', ?, 0)
+                """, batchId, marker + "/answer.docx", marker, marker, submissionId);
+        long studentImportId = jdbcTemplate.queryForObject(
+                "select max(id) from answer_import_students where batch_id = ?", Long.class, batchId);
+        jdbcTemplate.update("""
+                insert into answer_import_answers
+                    (student_import_id, answer_order, question_id, question_no, question_type,
+                     source_question_no, source_question_type, raw_answer, parse_status)
+                values (?, 1, ?, 1, 'CHOICE', 1, 'CHOICE', 'B', 'SUCCESS')
+                """, studentImportId, exam.choiceQuestionId());
+        jdbcTemplate.update("""
+                insert into answer_import_issues
+                    (batch_id, student_import_id, answer_order, code, message)
+                values (?, ?, 1, 'RESOLVED_TEST_ISSUE', '已处理的测试异常')
+                """, batchId, studentImportId);
+    }
+
+    private List<Integer> examGraphCounts(long examId) {
+        return List.of(
+                count("select count(*) from exams where id = ?", examId),
+                count("select count(*) from questions where exam_id = ?", examId),
+                count("""
+                        select count(*) from question_rubric_items qri
+                        join questions q on q.id = qri.question_id where q.exam_id = ?
+                        """, examId),
+                count("select count(*) from exam_submissions where exam_id = ?", examId),
+                count("select count(*) from student_answers where exam_id = ?", examId),
+                count("""
+                        select count(*) from grading_results gr
+                        join student_answers sa on sa.id = gr.student_answer_id where sa.exam_id = ?
+                        """, examId),
+                count("""
+                        select count(*) from grading_result_items gri
+                        join grading_results gr on gr.id = gri.grading_result_id
+                        join student_answers sa on sa.id = gr.student_answer_id where sa.exam_id = ?
+                        """, examId),
+                count("select count(*) from grading_tasks where exam_id = ?", examId),
+                count("""
+                        select count(*) from grading_task_items gti
+                        join grading_tasks gt on gt.id = gti.task_id where gt.exam_id = ?
+                        """, examId),
+                count("select count(*) from answer_import_batches where exam_id = ?", examId),
+                count("""
+                        select count(*) from answer_import_students ais
+                        join answer_import_batches aib on aib.id = ais.batch_id where aib.exam_id = ?
+                        """, examId),
+                count("""
+                        select count(*) from answer_import_answers aia
+                        join answer_import_students ais on ais.id = aia.student_import_id
+                        join answer_import_batches aib on aib.id = ais.batch_id where aib.exam_id = ?
+                        """, examId),
+                count("""
+                        select count(*) from answer_import_issues aii
+                        join answer_import_batches aib on aib.id = aii.batch_id where aib.exam_id = ?
+                        """, examId)
+        );
+    }
+
+    private int count(String sql, long examId) {
+        return jdbcTemplate.queryForObject(sql, Integer.class, examId);
     }
 
     private ExamIds createExamWithChoiceAndShortAnswer() throws Exception {

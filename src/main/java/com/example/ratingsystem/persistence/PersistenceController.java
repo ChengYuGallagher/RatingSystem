@@ -62,7 +62,7 @@ public class PersistenceController {
     @DeleteMapping("/exams/{examId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     void deleteExam(@PathVariable Long examId) {
-        deletionService.deleteEmptyExam(examId);
+        deletionService.deleteExam(examId);
     }
 
     @PutMapping("/exams/{examId}/standards/confirm")

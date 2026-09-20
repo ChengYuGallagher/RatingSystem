@@ -55,6 +55,13 @@ button, input, select, textarea { font: inherit; }
 .button.secondary { background: #fff; border-color: #cbd3df; color: #243b5a; }
 .button.ghost { background: transparent; color: #385477; }
 .button.danger { color: var(--red); border-color: #ecc; }
+.confirm-dialog { width: min(520px, calc(100% - 32px)); border: 0; border-radius: 15px; padding: 0; color: inherit; box-shadow: 0 22px 70px rgba(13, 29, 52, .24); }
+.confirm-dialog::backdrop { background: rgba(20, 31, 48, .48); }
+.confirm-dialog-body { padding: 26px; }
+.confirm-dialog h2 { margin: 0 0 18px; }
+.confirm-dialog p { color: var(--muted); line-height: 1.65; }
+.confirm-dialog .danger-message { color: #8f2929; background: #fff3f2; border-radius: 9px; padding: 12px; }
+.confirm-dialog .button.danger { background: var(--red); border-color: var(--red); color: #fff; }
 .actions { justify-content: flex-start; margin-top: 16px; }
 .actions.end { justify-content: flex-end; }
 .actions.split { justify-content: space-between; }

@@ -320,14 +320,17 @@ class BatchAnswerImportIntegrationTests {
     }
 
     @Test
-    void examWithAnswerImportHistoryCannotBeDeleted() throws Exception {
+    void examWithAnswerImportHistoryCanBeDeletedCompletely() throws Exception {
         ExamFixture exam = createChoiceOnlyExam();
         upload(exam.examId(), zip(Map.of(
                 "班级/20005_戊/20005_戊.docx", docx("1. A"))));
 
         mockMvc.perform(delete("/api/exams/{id}", exam.examId()))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.detail").value("该试卷已有答卷导入记录，不能直接删除"));
+                .andExpect(status().isNoContent());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "select count(*) from answer_import_batches where exam_id = ?", Integer.class, exam.examId()));
+        mockMvc.perform(get("/api/exams/{id}", exam.examId()))
+                .andExpect(status().isNotFound());
     }
 
     private ExamFixture createExam() throws Exception {

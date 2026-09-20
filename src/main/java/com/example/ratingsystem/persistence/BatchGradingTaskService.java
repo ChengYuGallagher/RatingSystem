@@ -39,6 +39,10 @@ public class BatchGradingTaskService {
     }
 
     public GradingTaskView start(Long examId) {
+        TaskStart reusable = transactions.execute(status -> findReusableTaskWithoutLock(examId));
+        if (reusable != null) {
+            return get(reusable.taskId());
+        }
         TaskStart start = transactions.execute(status -> createOrReuse(examId));
         if (start == null) {
             throw new IllegalStateException("无法创建批量评分任务");
@@ -47,6 +51,23 @@ public class BatchGradingTaskService {
             worker.run(start.taskId());
         }
         return get(start.taskId());
+    }
+
+    private TaskStart findReusableTaskWithoutLock(Long examId) {
+        ExamEntity exam = examRepository.findById(examId)
+                .orElseThrow(() -> new PersistenceNotFoundException("考试不存在: " + examId));
+        if (!exam.isStandardsReviewed()) {
+            throw new PersistenceConflictException("必须先由教师核对并确认标准答案和评分细则");
+        }
+        GradingTaskEntity latest = taskRepository.findFirstByExamIdOrderByIdDesc(examId).orElse(null);
+        if (latest == null || latest.getStatus() == GradingTaskStatus.RUNNING && isInterrupted(latest)) {
+            return null;
+        }
+        Set<Long> previous = latest.getItems().stream()
+                .map(item -> item.getSubmission().getId()).collect(java.util.stream.Collectors.toSet());
+        Set<Long> current = submissionRepository.findByExamIdOrderById(examId).stream()
+                .map(ExamSubmissionEntity::getId).collect(java.util.stream.Collectors.toSet());
+        return previous.equals(current) ? new TaskStart(latest.getId(), false) : null;
     }
 
     public GradingTaskView retryFailed(Long taskId) {

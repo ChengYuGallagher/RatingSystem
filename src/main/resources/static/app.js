@@ -1,4 +1,4 @@
-const state = {exams: [], exam: null, batch: null, task: null, classResults: null, aiSettings: null, pollTimer: null, reviewIndex: -1, createOrigin: 'home'};
+const state = {exams: [], exam: null, batch: null, task: null, classResults: null, aiSettings: null, pollTimer: null, reviewIndex: -1, createOrigin: 'home', deleteCandidate: null};
 const $ = id => document.getElementById(id);
 const typeName = type => ({CHOICE:'选择题',FILL_BLANK:'填空题',TRUE_FALSE:'判断题',SHORT_ANSWER:'简答题',PROGRAMMING:'编程题'})[type] || type;
 const parseStatusName = value => ({SUCCESS:'解析成功',NEEDS_REVIEW:'需要核对',FAILED:'解析失败'})[value] || value;
@@ -48,7 +48,7 @@ function renderExamLists() {
         : (state.exams.length ? '<div class="empty">没有找到名称匹配的试卷。</div>' : empty);
     $('exam-library-count').textContent = keyword ? `找到 ${visible.length} / 共 ${state.exams.length} 份` : `共 ${state.exams.length} 份`;
     document.querySelectorAll('[data-open-exam]').forEach(node => node.onclick = () => openExam(Number(node.dataset.openExam)));
-    document.querySelectorAll('[data-delete-exam]').forEach(node => node.onclick = () => deleteExam(Number(node.dataset.deleteExam), node.dataset.examName));
+    document.querySelectorAll('[data-delete-exam]').forEach(node => node.onclick = () => openDeleteExamDialog(Number(node.dataset.deleteExam), node.dataset.examName));
 }
 async function openExam(id, tab='standards') {
     try {
@@ -56,11 +56,30 @@ async function openExam(id, tab='standards') {
         showView('workspace-view'); renderExam(); showWorkspaceTab(tab);
     } catch (error) { notify(error.message,'error'); }
 }
-async function deleteExam(id, name) {
-    if (!confirm(`确定删除“${name}”吗？仅没有答卷、导入记录和成绩的试卷可以删除。`)) return;
-    if (!confirm('此操作会删除试卷题目和评分标准，且不能撤销。继续删除吗？')) return;
-    try { await api(`/api/exams/${id}`,{method:'DELETE'}); await loadExams(); notify('空试卷已删除。','success'); }
-    catch (error) { notify(error.message,'error'); }
+function openDeleteExamDialog(id, name) {
+    state.deleteCandidate = {id, name};
+    $('delete-exam-name').textContent = name;
+    $('delete-exam-dialog').showModal();
+}
+function closeDeleteExamDialog() {
+    if ($('delete-exam-dialog').open) $('delete-exam-dialog').close();
+    state.deleteCandidate = null;
+}
+async function confirmDeleteExam() {
+    if (!state.deleteCandidate) return;
+    const candidate = state.deleteCandidate;
+    const button = $('confirm-delete-exam');
+    button.disabled = true; button.textContent = '正在删除…';
+    try {
+        await api(`/api/exams/${candidate.id}`,{method:'DELETE'});
+        closeDeleteExamDialog();
+        await loadExams();
+        notify(`试卷“${candidate.name}”及其关联数据已永久删除。`,'success');
+    } catch (error) {
+        notify(error.message,'error');
+    } finally {
+        button.disabled = false; button.textContent = '确认删除';
+    }
 }
 
 function showWorkspaceTab(tab) {
@@ -176,11 +195,12 @@ function goHome(){clearTimeout(state.pollTimer);showView('home-view');loadExams(
 function showCreateMethods(origin='home'){state.createOrigin=origin;resetEditor();$('create-methods-back').textContent=origin==='library'?'← 返回试卷库':'← 返回首页';showView('create-methods-view');}
 function showManualCreate(){resetEditor();addQuestion();showView('manual-create-view');}
 
-$('home-button').onclick=goHome;$('workspace-home').onclick=goHome;$('workspace-library').onclick=showExamLibrary;$('show-settings').onclick=showSettings;$('show-create-methods').onclick=()=>showCreateMethods('home');$('show-exam-library').onclick=showExamLibrary;$('create-methods-back').onclick=()=>state.createOrigin==='library'?showExamLibrary():goHome();document.querySelectorAll('[data-go-home]').forEach(b=>b.onclick=goHome);document.querySelectorAll('[data-go-create]').forEach(b=>b.onclick=()=>showCreateMethods(state.createOrigin));document.querySelectorAll('[data-open-ai-settings]').forEach(b=>b.onclick=showSettings);
+$('home-button').onclick=goHome;$('workspace-home').onclick=goHome;$('workspace-library').onclick=showExamLibrary;$('show-settings').onclick=showSettings;$('show-create-methods').onclick=()=>showCreateMethods('home');$('show-exam-library').onclick=showExamLibrary;$('create-methods-back').onclick=()=>state.createOrigin==='library'?showExamLibrary():goHome();document.querySelectorAll('[data-go-home]').forEach(b=>b.onclick=goHome);document.querySelectorAll('[data-go-create]').forEach(b=>b.onclick=()=>showCreateMethods(state.createOrigin));
 $('show-ai-import').onclick=()=>showView('ai-import-view');$('show-manual-create').onclick=showManualCreate;$('preview-exam-docx').onclick=importExamDocx;$('add-question').onclick=()=>addQuestion();$('exam-form').onsubmit=createExam;$('management-create').onclick=()=>showCreateMethods('library');
 document.querySelectorAll('[data-workspace-tab]').forEach(b=>b.onclick=()=>showWorkspaceTab(b.dataset.workspaceTab));
 $('exam-library-search').oninput=renderExamLists;
 $('confirm-standards').onclick=async()=>{try{state.exam=await api(`/api/exams/${state.exam.id}/standards/confirm`,{method:'PUT'});renderExam();await loadExams();notify('评分标准已确认，可以开始批改。','success');}catch(error){notify(error.message,'error');}};
 $('begin-grading').onclick=()=>showWorkspaceTab('workflow');$('upload-zip').onclick=uploadZip;$('confirm-import-grade').onclick=confirmImportAndGrade;$('retry-grading').onclick=retryTask;$('view-results').onclick=()=>showWorkspaceTab('results');$('refresh-results').onclick=loadClassResults;$('back-to-students').onclick=()=>{$('review-detail-view').classList.add('hidden');$('results-list-view').classList.remove('hidden');};$('review-next').onclick=()=>openReview(state.reviewIndex+1);$('save-ai-settings').onclick=saveAiSettings;$('test-ai-connection').onclick=testAiConnection;
+$('cancel-delete-exam').onclick=closeDeleteExamDialog;$('confirm-delete-exam').onclick=confirmDeleteExam;$('delete-exam-dialog').addEventListener('close',()=>{state.deleteCandidate=null;});
 
 loadExams().catch(error=>notify(error.message,'error'));
